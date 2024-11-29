@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<head>
+    <title>MacSurge</title>
+    <link rel="shortcut icon" type="image/png" href="../static/skull.png" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" type="text/css"
+        href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.0.1/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css"
+        href="https://cdn.datatables.net/v/bs5/jq-3.6.0/dt-1.11.3/b-2.0.1/datatables.min.css" />
+    <script type="text/javascript"
+        src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.0.1/js/bootstrap.bundle.min.js"></script>
+    <script type="text/javascript"
+        src="https://cdn.datatables.net/v/bs5/jq-3.6.0/dt-1.11.3/b-2.0.1/datatables.min.js"></script>
+</head>
+
+<body class="bg-dark">
+    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-3 mb-lg-3 mt-lg-5 mx-lg-5">
+        <div class="container-fluid">
+            <a class="navbar-brand" target="_blank" href="https://github.com/Evilvirus/MacSurge">
+                <img src="../static/skull.png" alt="" width="24" class="d-inline-block align-text-top">
+                MacSurge
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false"
+                aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/portals"><i class="fa fa-server"></i> Portals</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/editor"><i class="fa fa-list"></i> Playlist Editor</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/settings"><i class="fa fa-sliders"></i> Settings</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" target="_blank" href="/playlist.m3u"><i class="fa fa-file-video-o"></i>
+                            Playlist</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" target="_blank" href="/xmltv"><i class="fa fa-file-code-o"></i> XMLTV</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+    <div class="alert alert-{{ category }} alert-dismissible auto-dismiss fade show mx-lg-5" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+</body>
+
+</html>
+
+<script>
+    // remove flash after delay
+    window.setTimeout(function () {
+        $(".auto-dismiss").fadeTo(500, 0).slideUp(500, function () {
+            $(this).remove();
+        });
+    }, 4000);
+
+    // remove sticky focus on buttons
+    $(".btn").mouseup(function () {
+        $(this).blur();
+    })
+
+    // prevent enter submitting forms
+    $(document).on("keydown", ":input:not(textarea)", function (event) {
+        if (event.key == "Enter") {
+            event.preventDefault();
+        }
+    });
+</script>
