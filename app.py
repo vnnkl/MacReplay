@@ -45,10 +45,10 @@ import waitress
 app = Flask(__name__)
 app.secret_key = secrets.token_urlsafe(32)
 
-logger = logging.getLogger("MacSurge")
+logger = logging.getLogger("MacReplay")
 logger.setLevel(logging.INFO)
 logFormat = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-fileHandler = logging.FileHandler("MacSurge.log")
+fileHandler = logging.FileHandler("MacReplay.log")
 fileHandler.setFormatter(logFormat)
 logger.addHandler(fileHandler)
 consoleFormat = logging.Formatter("[%(levelname)s] %(message)s")
@@ -71,7 +71,7 @@ basePath = os.path.expanduser("~")
 if os.getenv("CONFIG"):
     configFile = os.getenv("CONFIG")
 else:
-    configFile = os.path.join(basePath, "evilvir.us", "MacSurge.json")
+    configFile = os.path.join(basePath, "evilvir.us", "MacReplay.json")
 
 # Ensure the subdirectory exists
 os.makedirs(os.path.dirname(configFile), exist_ok=True)
@@ -109,7 +109,7 @@ defaultSettings = {
     "username": "admin",
     "password": "12345",
     "enable hdhr": "true",
-    "hdhr name": "MacSurge",
+    "hdhr name": "MacReplay",
     "hdhr id": str(uuid.uuid4().hex),
     "hdhr tuners": "10",
 }
@@ -1104,7 +1104,7 @@ def log():
     basePath = os.path.expanduser("~")
 
     # Define the path for the log file in the 'evilvir.us' subdirectory
-    logFilePath = os.path.join(basePath, "evilvir.us", "MacSurge.log")
+    logFilePath = os.path.join(basePath, "evilvir.us", "MacReplay.log")
 
     # Ensure the subdirectory exists
     os.makedirs(os.path.dirname(logFilePath), exist_ok=True)
@@ -1152,7 +1152,7 @@ def discover():
         "BaseURL": host,
         "DeviceAuth": name,
         "DeviceID": id,
-        "FirmwareName": "MacSurge",
+        "FirmwareName": "MacReplay",
         "FirmwareVersion": "666",
         "FriendlyName": name,
         "LineupURL": host + "/lineup.json",

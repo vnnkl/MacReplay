@@ -1,6 +1,6 @@
-# **MacCast**
+# **MacReplay**
 
-MacCast is a modified version of [STB-Proxy](https://github.com/Chris230291/STB-Proxy), designed for seamless connectivity between MAC address portals and media platforms like Plex or M3U-based software.  
+MacReplay is a modified version of [STB-Proxy](https://github.com/Chris230291/STB-Proxy), designed for seamless connectivity between MAC address portals and media platforms like Plex or M3U-based software.  
 
 This lightweight solution eliminates the need for Docker by compiling everything into a single executable file, making it easy to use and deploy on Windows systems.
 
@@ -15,14 +15,14 @@ This lightweight solution eliminates the need for Docker by compiling everything
 ---
 
 ## **Requirements**
-To use MacCast, ensure you have the following:
+To use MacReplay, ensure you have the following:
 - **Windows**: Version 8 or higher.  
 - **Plex Pass**: If you're connecting to Plex.  
 
 ---
 
 ## **Getting Started**
-1. **Download** the latest release from the [Releases page](https://github.com/Evilvir-us/MacCast/releases).  
+1. **Download** the latest release from the [Releases page](https://github.com/Evilvir-us/MacReplay/releases).  
 2. **Run** the executable on your Windows system.  
 3. **Open** the server URL in your web browser.  
 4. **Add** your server address and MAC addresses on the Portals page.  
@@ -33,7 +33,7 @@ To use MacCast, ensure you have the following:
 ---
 
 ## **Credits**
-MacCast is based on the incredible work done by [Chris230291](https://github.com/Chris230291) with the original [STB-Proxy](https://github.com/Chris230291/STB-Proxy).  
+MacReplay is based on the incredible work done by [Chris230291](https://github.com/Chris230291) with the original [STB-Proxy](https://github.com/Chris230291/STB-Proxy).  
 
 ---
 
