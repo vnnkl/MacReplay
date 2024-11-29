@@ -20,7 +20,7 @@ To use MacSurge, ensure you have the following:
 ---
 
 ## **Getting Started**
-1. **Download** the latest release from the [Releases page](#).  
+1. **Download** the latest release from the [Releases page](https://github.com/Evilvir-us/MacSurge/releases)).  
 2. **Run** the executable on your Windows system.  
 3. **Open** the the server url in your web browser.  
 4. **Add** your server address, and mac addresses in the portals page.
