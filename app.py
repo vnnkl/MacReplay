@@ -83,20 +83,30 @@ occupied = {}
 config = {}
 
 d_ffmpegcmd = [
-    ffmpeg_path,  # Path to ffmpeg executable
-    "-re",        # Flag for real-time streaming
-    "-http_proxy", "<proxy>",  # Proxy setting
-    "-timeout", "<timeout>",  # Timeout setting
-    "-i", "<url>",  # Input URL
-    "-map", "0",  # Map all streams
-    "-codec", "copy",  # Copy codec (no re-encoding)
-    "-f", "mpegts",  # Output format
-    "pipe:"  # Output to pipe
+    "-re",                      # Flag for real-time streaming
+    "-http_proxy", "<proxy>",   # Proxy setting
+    "-timeout", "<timeout>",    # Timeout setting
+    "-i", "<url>",              # Input URL
+    "-map", "0",                # Map all streams
+    "-codec", "copy",           # Copy codec (no re-encoding)
+    "-f", "mpegts",             # Output format
+    "-flush_packets", "1",      # Enable flushing packets
+    "-fflags", "nobuffer",      # No buffering
+    "-flags", "low_delay",      # Low delay flag
+    "-strict", "experimental",  # Use experimental features
+    "pipe:"                     # Output to pipe
 ]
+
+
+
+
+
+
+
 
 defaultSettings = {
     "stream method": "ffmpeg",
-    "ffmpeg command": f"{ffmpeg_path} -re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts pipe:",
+    "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 1 -fflags nobuffer -flags low_delay -strict experimental pipe:",
     "ffmpeg timeout": "5",
     "test streams": "true",
     "try all macs": "true",
@@ -941,7 +951,7 @@ def channel(portalId, channelId):
 
                 else:
                     if getSettings().get("stream method", "ffmpeg") == "ffmpeg":
-                        ffmpegcmd = str(getSettings()["ffmpeg command"])
+                        ffmpegcmd = f"{ffmpeg_path} {getSettings()['ffmpeg command']}"
                         ffmpegcmd = ffmpegcmd.replace("<url>", link)
                         ffmpegcmd = ffmpegcmd.replace(
                             "<timeout>",
@@ -1029,7 +1039,7 @@ def channel(portalId, channelId):
                                                         )
                                                         == "ffmpeg"
                                                     ):
-                                                        ffmpegcmd = str(
+                                                        ffmpegcmd = ffmpeg_path + " " + str(
                                                             getSettings()[
                                                                 "ffmpeg command"
                                                             ]
