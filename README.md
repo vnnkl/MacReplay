@@ -9,6 +9,8 @@ This lightweight solution eliminates the need for Docker by compiling everything
 ## **Features**
 - 🛠️ **Single Executable**: No need for Docker; everything is packed into one `.exe` file.  
 - 🔗 **MAC Portal Integration**: Connect MAC address portals directly with Plex or M3U software.   
+- 🐦‍🔥 **Multiple MACs**: Rotate between MAC addresses across a single portal, allowing for multiple connections simultaneously.  
+- 🦕 **Multiple Portals**: Add multiple portal URLs to get channels from different providers in the same playlist.
 
 ---
 
@@ -22,11 +24,11 @@ To use MacSurge, ensure you have the following:
 ## **Getting Started**
 1. **Download** the latest release from the [Releases page](https://github.com/Evilvir-us/MacSurge/releases).  
 2. **Run** the executable on your Windows system.  
-3. **Open** the the server url in your web browser.  
-4. **Add** your server address, and mac addresses in the portals page.
-5. **Enable** the channels you want to use in the playlist editor and save them. (remember, plex has a limit of 480 channels)
-6. **???**
-7. Profit!!!!!
+3. **Open** the server URL in your web browser.  
+4. **Add** your server address and MAC addresses on the Portals page.  
+5. **Enable** the channels you want to use in the Playlist Editor and save them. *(Note: Plex has a limit of 480 channels.)*  
+6. **???**  
+7. **Profit!!!**
 
 ---
 
