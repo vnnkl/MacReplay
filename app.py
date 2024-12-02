@@ -95,19 +95,21 @@ last_updated = 0
 
 d_ffmpegcmd = [
     "-re",                      # Flag for real-time streaming
-    "-http_proxy", "<proxy>",   # Proxy setting
-    "-timeout", "<timeout>",    # Timeout setting
-    "-i", "<url>",              # Input URL
-    "-map", "0",                # Map all streams
-    "-codec", "copy",           # Copy codec (no re-encoding)
-    "-f", "mpegts",             # Output format
-    "-flush_packets", "1",      # Enable flushing packets
-    "-fflags", "nobuffer",      # No buffering
-    "-flags", "low_delay",      # Low delay flag
-    "-strict", "experimental",  # Use experimental features
-    "pipe:"                     # Output to pipe
+    "-http_proxy", "<proxy>",    # Proxy setting
+    "-timeout", "<timeout>",     # Timeout setting
+    "-i", "<url>",               # Input URL
+    "-map", "0",                 # Map all streams
+    "-codec", "copy",            # Copy codec (no re-encoding)
+    "-f", "mpegts",              # Output format
+    "-flush_packets", "1",       # Enable flushing packets
+    "-fflags", "nobuffer",       # No buffering
+    "-flags", "low_delay",       # Low delay flag
+    "-strict", "experimental",   # Use experimental features
+    "-analyzeduration", "3000000",  # Set the duration to 3 seconds (in microseconds)
+    "-probesize", "5000000",     # Set probe size (in bytes) for better stream analysis
+    "-max_delay", "3000000",     # Set max delay to 3 seconds (in microseconds)
+    "pipe:"                      # Output to pipe
 ]
-
 
 
 
@@ -117,7 +119,7 @@ d_ffmpegcmd = [
 
 defaultSettings = {
     "stream method": "ffmpeg",
-    "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 1 -fflags nobuffer -flags low_delay -strict experimental pipe:",
+    "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 1 -fflags nobuffer -flags low_delay -strict experimental -analyzeduration 3000000 -probesize 5000000 -max_delay 3000000 pipe:",
     "ffmpeg timeout": "5",
     "test streams": "true",
     "try all macs": "true",
@@ -687,7 +689,7 @@ def generate_playlist():
                                 channelNumber = str(channel.get("number"))
                             epgId = customEpgIds.get(channelId)
                             if epgId is None:
-                                epgId = portal + channelId
+                                epgId = channelName
                             channels.append(
                                 "#EXTINF:-1"
                                 + ' tvg-id="'
@@ -796,7 +798,7 @@ def refresh_xmltv():
                                     channelName = str(c.get("name"))
                                 epgId = customEpgIds.get(channelId)
                                 if epgId is None:
-                                    epgId = portal + channelId
+                                    epgId = channelName
                                 channelEle = ET.SubElement(
                                     channels, "channel", id=epgId
                                 )
