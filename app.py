@@ -417,6 +417,7 @@ def editor():
     # Define tasks to run in the background
     Thread(target=refresh_lineup).start()
     Thread(target=update_playlistm3u).start()
+    Thread(target=refresh_xmltv).start()
     # Render the template immediately
     return render_template("editor.html")
     
@@ -610,6 +611,8 @@ def editorReset():
     flash("Playlist reset!", "success")
     refresh_lineup()
     update_playlistm3u()
+    refresh_xmltv()
+    
     return redirect("/editor", code=302)
 
 
@@ -687,15 +690,18 @@ def generate_playlist():
                                 epgId = portal + channelId
                             channels.append(
                                 "#EXTINF:-1"
-                                + ' tvg-id="' + epgId
+                                + ' tvg-id="'
+                                + epgId
                                 + (
-                                    '" tvg-chno="' + str(channelNumber)
-                                    if getSettings().get("use channel numbers", "true") == "true"
+                                    '" tvg-chno="' + channelNumber
+                                    if getSettings().get("use channel numbers", "true")
+                                    == "true"
                                     else ""
                                 )
                                 + (
                                     '" group-title="' + genre
-                                    if getSettings().get("use channel genres", "true") == "true"
+                                    if getSettings().get("use channel genres", "true")
+                                    == "true"
                                     else ""
                                 )
                                 + '",'
