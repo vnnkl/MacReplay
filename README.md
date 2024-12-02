@@ -35,6 +35,23 @@ To use MacReplay, ensure you have the following:
 
 ---
 
+## Troubleshooting
+
+If the TV guide is not being populated:
+Check the [XMLTV guide](http://192.168.1.88:8001/xmltv).
+If it is just the list of channels with nothing below them, the provider likely does not supply a guide.
+Try switching to a different provider.
+
+---
+
+## **Known Issues**
+
+Channel logos may not display when viewed in a browser. This is likely due to browser limitations, possibly related to HTTP files being served on an HTTPS page or how Plex handles it.  
+
+This issue does not occur with [PLEX HTPC](https://apps.microsoft.com/store/detail/XPFFFF6NN1LZDQ?ocid=pdpshare). To watch from a PC, use [PLEX HTPC](https://apps.microsoft.com/store/detail/XPFFFF6NN1LZDQ?ocid=pdpshare). If any logos are still missing, it means the provider isn't supplying them.
+
+---
+
 ## **Credits**
 MacReplay is based on the incredible work done by [Chris230291](https://github.com/Chris230291) with the original [STB-Proxy](https://github.com/Chris230291/STB-Proxy).  
 
