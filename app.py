@@ -95,20 +95,21 @@ last_updated = 0
 
 d_ffmpegcmd = [
     "-re",                      # Flag for real-time streaming
-    "-http_proxy", "<proxy>",    # Proxy setting
-    "-timeout", "<timeout>",     # Timeout setting
-    "-i", "<url>",               # Input URL
-    "-map", "0",                 # Map all streams
-    "-codec", "copy",            # Copy codec (no re-encoding)
-    "-f", "mpegts",              # Output format
-    "-flush_packets", "1",       # Enable flushing packets
-    "-fflags", "nobuffer",       # No buffering
-    "-flags", "low_delay",       # Low delay flag
-    "-strict", "experimental",   # Use experimental features
-    "-analyzeduration", "3000000",  # Set the duration to 3 seconds (in microseconds)
-    "-probesize", "5000000",     # Set probe size (in bytes) for better stream analysis
-    "-max_delay", "3000000",     # Set max delay to 3 seconds (in microseconds)
-    "pipe:"                      # Output to pipe
+    "-http_proxy", "<proxy>",   # Proxy setting
+    "-timeout", "<timeout>",    # Timeout setting
+    "-i", "<url>",              # Input URL
+    "-map", "0",                # Map all streams
+    "-codec", "copy",           # Copy codec (no re-encoding)
+    "-f", "mpegts",             # Output format
+    "-flush_packets", "0",      # Disable flushing packets (optimized for faster output)
+    "-fflags", "+nobuffer",     # No buffering for low latency
+    "-flags", "low_delay",      # Low delay flag
+    "-strict", "experimental",  # Use experimental features
+    "-analyzeduration", "0",    # Skip analysis duration for faster startup
+    "-probesize", "32",         # Set probe size to reduce input analysis time
+    "-copyts",                  # Copy timestamps (avoid recalculating)
+    "-threads", "12",           # Enable multi-threading (adjust thread count as needed)
+    "pipe:"                     # Output to pipe
 ]
 
 
@@ -119,7 +120,7 @@ d_ffmpegcmd = [
 
 defaultSettings = {
     "stream method": "ffmpeg",
-    "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 1 -fflags nobuffer -flags low_delay -strict experimental -analyzeduration 3000000 -probesize 5000000 -max_delay 3000000 pipe:",
+    "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -strict experimental -analyzeduration 0 -probesize 32 -copyts -threads 12 pipe:",
     "ffmpeg timeout": "5",
     "test streams": "true",
     "try all macs": "true",
@@ -723,9 +724,9 @@ def generate_playlist():
     if getSettings().get("sort playlist by channel name", "true") == "true":
         channels.sort(key=lambda k: k.split(",")[1].split("\n")[0])
     if getSettings().get("use channel numbers", "true") == "true":
-        if getSettings().get("sort playlist by channel number", "false") == "true":
+        if getSettings().get("sort playlist by channel number", "true") == "true":
             channels.sort(key=lambda k: k.split('tvg-chno="')[1].split('"')[0])
-    if getSettings().get("use channel genres", "true") == "true":
+    if getSettings().get("use channel genres", "false") == "true":
         if getSettings().get("sort playlist by channel genre", "false") == "true":
             channels.sort(key=lambda k: k.split('group-title="')[1].split('"')[0])
 
@@ -1223,7 +1224,7 @@ def hdhr(f):
 @app.route("/discover.json", methods=["GET"])
 @hdhr
 def discover():
-    logger.info("We are being discovered!")
+    logger.info("HDHR Status Requested.")
     settings = getSettings()
     name = settings["hdhr name"]
     id = settings["hdhr id"]
@@ -1246,7 +1247,7 @@ def discover():
 @app.route("/lineup_status.json", methods=["GET"])
 @hdhr
 def status():
-    logger.info("HDHR Status Requested.")
+    logger.info("Channel Lineup Requested.")
     data = {
         "ScanInProgress": 0,
         "ScanPossible": 0,
@@ -1307,6 +1308,10 @@ def refresh_lineup():
                             )
                 else:
                     logger.error("Error making lineup for {}, skipping".format(name))
+    
+    # Sort lineup by 'GuideNumber' (channel number)
+    lineup.sort(key=lambda x: int(x['GuideNumber']) if x['GuideNumber'].isdigit() else float('inf'))
+
     cached_lineup = lineup
     logger.info("Lineup Refreshed.")
     
