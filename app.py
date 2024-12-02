@@ -1,6 +1,10 @@
 import sys
 import os
 import shutil
+import time
+from datetime import datetime
+import xml.etree.ElementTree as ET
+from threading import Thread
 
 # Check if running as a PyInstaller executable
 if getattr(sys, 'frozen', False):
@@ -11,17 +15,18 @@ else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Paths to ffmpeg.exe and ffprobe.exe in the root folder
-ffmpeg_path = os.path.join(app_dir, 'ffmpeg.exe')
-ffprobe_path = os.path.join(app_dir, 'ffprobe.exe')
+ffmpeg_path = os.path.join(app_dir, 'ffmpeg', 'ffmpeg.exe')
+ffprobe_path = os.path.join(app_dir, 'ffmpeg', 'ffprobe.exe')
 
 # Check if the files exist (for debugging purposes)
 if not os.path.exists(ffmpeg_path) or not os.path.exists(ffprobe_path):
-    print("Error: ffmpeg.exe or ffprobe.exe not found!")
+    logger.error("Error: ffmpeg.exe or ffprobe.exe not found!")
 #else:
 #    print(f"Found ffmpeg at {ffmpeg_path}")
 #    print(f"Found ffprobe at {ffprobe_path}")
 
 import flask
+from flask import Flask, jsonify
 import stb
 import json
 import subprocess
@@ -62,7 +67,7 @@ if os.getenv("HOST"):
     host = os.getenv("HOST")
 else:
     host = "127.0.0.1:8001"
-print(f"Server started on http://{host}")
+logger.info(f"Server started on http://{host}")
 
 # Get the base path for the user directory
 basePath = os.path.expanduser("~")
@@ -76,11 +81,17 @@ else:
 # Ensure the subdirectory exists
 os.makedirs(os.path.dirname(configFile), exist_ok=True)
 
-print(f"Using config file: {configFile}")
+logger.info(f"Using config file: {configFile}")
 
 
 occupied = {}
 config = {}
+cached_lineup = []
+cached_playlist = None
+
+cached_xmltv = None
+last_updated = 0
+
 
 d_ffmpegcmd = [
     "-re",                      # Flag for real-time streaming
@@ -403,7 +414,12 @@ def portalRemove():
 @app.route("/editor", methods=["GET"])
 @authorise
 def editor():
+    # Define tasks to run in the background
+    Thread(target=refresh_lineup).start()
+    Thread(target=update_playlistm3u).start()
+    # Render the template immediately
     return render_template("editor.html")
+    
 
 
 @app.route("/editor_data", methods=["GET"])
@@ -412,6 +428,7 @@ def editor_data():
     channels = []
     portals = getPortals()
     for portal in portals:
+        logger.info(f"getting Data from {portal}")
         if portals[portal]["enabled"] == "true":
             portalName = portals[portal]["name"]
             url = portals[portal]["url"]
@@ -425,6 +442,7 @@ def editor_data():
             fallbackChannels = portals[portal].get("fallback channels", {})
 
             for mac in macs:
+                logger.info(f"Using mac: {mac}")
                 try:
                     token = stb.getToken(url, mac, proxy)
                     stb.getProfile(url, mac, token, proxy)
@@ -572,7 +590,6 @@ def editorSave():
     savePortals(portals)
     logger.info("Playlist config saved!")
     flash("Playlist config saved!", "success")
-
     return redirect("/editor", code=302)
 
 
@@ -591,7 +608,8 @@ def editorReset():
     savePortals(portals)
     logger.info("Playlist reset!")
     flash("Playlist reset!", "success")
-
+    refresh_lineup()
+    update_playlistm3u()
     return redirect("/editor", code=302)
 
 
@@ -619,11 +637,13 @@ def save():
     return redirect("/settings", code=302)
 
 
-@app.route("/playlist.m3u", methods=["GET"])
-@authorise
-def playlist():
+def generate_playlist():
+    global cached_playlist
+    logger.info("Generating playlist.m3u...")
+
     channels = []
     portals = getPortals()
+
     for portal in portals:
         if portals[portal]["enabled"] == "true":
             enabledChannels = portals[portal].get("enabled channels", [])
@@ -653,17 +673,17 @@ def playlist():
                         channelId = str(channel.get("id"))
                         if channelId in enabledChannels:
                             channelName = customChannelNames.get(channelId)
-                            if channelName == None:
+                            if channelName is None:
                                 channelName = str(channel.get("name"))
                             genre = customGenres.get(channelId)
-                            if genre == None:
+                            if genre is None:
                                 genreId = str(channel.get("tv_genre_id"))
                                 genre = str(genres.get(genreId))
                             channelNumber = customChannelNumbers.get(channelId)
-                            if channelNumber == None:
+                            if channelNumber is None:
                                 channelNumber = str(channel.get("number"))
                             epgId = customEpgIds.get(channelId)
-                            if epgId == None:
+                            if epgId is None:
                                 epgId = portal + channelId
                             channels.append(
                                 "#EXTINF:-1"
@@ -694,6 +714,7 @@ def playlist():
                 else:
                     logger.error("Error making playlist for {}, skipping".format(name))
 
+    # Sorting the playlist based on settings
     if getSettings().get("sort playlist by channel name", "true") == "true":
         channels.sort(key=lambda k: k.split(",")[1].split("\n")[0])
     if getSettings().get("use channel numbers", "true") == "true":
@@ -706,15 +727,40 @@ def playlist():
     playlist = "#EXTM3U \n"
     playlist = playlist + "\n".join(channels)
 
-    return Response(playlist, mimetype="text/plain")
+    # Update the cache
+    cached_playlist = playlist
+    logger.info("Playlist generated and cached.")
 
-
-@app.route("/xmltv", methods=["GET"])
+# Route to serve the cached playlist.m3u
+@app.route("/playlist.m3u", methods=["GET"])
 @authorise
-def xmltv():
+def playlist():
+    global cached_playlist
+    
+    logger.info("Playlist Requested")
+    
+    # If the playlist is empty, regenerate it
+    if cached_playlist is None or len(cached_playlist) == 0:
+        generate_playlist()
+
+    return Response(cached_playlist, mimetype="text/plain")
+
+# Function to manually trigger playlist update
+@app.route("/update_playlistm3u", methods=["POST"])
+def update_playlistm3u():
+    generate_playlist()
+    return Response("Playlist updated successfully", status=200)
+
+
+# Function to refresh the XMLTV data
+def refresh_xmltv():
+    global cached_xmltv, last_updated
+    logger.info("Refreshing XMLTV...")
+    
     channels = ET.Element("tv")
     programmes = ET.Element("tv")
     portals = getPortals()
+    
     for portal in portals:
         if portals[portal]["enabled"] == "true":
             enabledChannels = portals[portal].get("enabled channels", [])
@@ -743,10 +789,10 @@ def xmltv():
                             channelId = c.get("id")
                             if str(channelId) in enabledChannels:
                                 channelName = customChannelNames.get(str(channelId))
-                                if channelName == None:
+                                if channelName is None:
                                     channelName = str(c.get("name"))
                                 epgId = customEpgIds.get(channelId)
-                                if epgId == None:
+                                if epgId is None:
                                     epgId = portal + channelId
                                 channelEle = ET.SubElement(
                                     channels, "channel", id=epgId
@@ -789,12 +835,30 @@ def xmltv():
                 else:
                     logger.error("Error making XMLTV for {}, skipping".format(name))
 
+    # Combine channels and programmes into a single XML document
     xmltv = channels
     for programme in programmes.iter("programme"):
         xmltv.append(programme)
 
+    # Update cache
+    cached_xmltv = ET.tostring(xmltv, encoding="unicode", xml_declaration=True)
+    last_updated = time.time()
+    logger.info("XMLTV Refreshed.")
+
+# Endpoint to get the XMLTV data
+@app.route("/xmltv", methods=["GET"])
+@authorise
+def xmltv():
+    global cached_xmltv, last_updated
+    
+    logger.info("Guide Requested")
+    
+    # Check if the cached XMLTV data is older than 15 minutes
+    if cached_xmltv is None or (time.time() - last_updated) > 900:  # 900 seconds = 15 minutes
+        refresh_xmltv()
+    
     return Response(
-        ET.tostring(xmltv, encoding="unicode", xml_declaration=True),
+        cached_xmltv,
         mimetype="text/xml",
     )
 
@@ -1154,6 +1218,7 @@ def hdhr(f):
 @app.route("/discover.json", methods=["GET"])
 @hdhr
 def discover():
+    logger.info("We are being discovered!")
     settings = getSettings()
     name = settings["hdhr name"]
     id = settings["hdhr id"]
@@ -1176,19 +1241,20 @@ def discover():
 @app.route("/lineup_status.json", methods=["GET"])
 @hdhr
 def status():
+    logger.info("HDHR Status Requested.")
     data = {
         "ScanInProgress": 0,
         "ScanPossible": 0,
-        "Source": "Antenna",
-        "SourceList": ["Antenna"],
+        "Source": "Cable",
+        "SourceList": ["Cable"],
     }
     return flask.jsonify(data)
 
 
-@app.route("/lineup.json", methods=["GET"])
-@app.route("/lineup.post", methods=["POST"])
-@hdhr
-def lineup():
+# Function to refresh the lineup
+def refresh_lineup():
+    global cached_lineup
+    logger.info("Refreshing Lineup...")
     lineup = []
     portals = getPortals()
     for portal in portals:
@@ -1216,10 +1282,10 @@ def lineup():
                         channelId = str(channel.get("id"))
                         if channelId in enabledChannels:
                             channelName = customChannelNames.get(channelId)
-                            if channelName == None:
+                            if channelName is None:
                                 channelName = str(channel.get("name"))
                             channelNumber = customChannelNumbers.get(channelId)
-                            if channelNumber == None:
+                            if channelNumber is None:
                                 channelNumber = str(channel.get("number"))
 
                             lineup.append(
@@ -1236,8 +1302,26 @@ def lineup():
                             )
                 else:
                     logger.error("Error making lineup for {}, skipping".format(name))
+    cached_lineup = lineup
+    logger.info("Lineup Refreshed.")
+    
+# Endpoint to get the current lineup
+@app.route("/lineup.json", methods=["GET"])
+@app.route("/lineup.post", methods=["POST"])
+@hdhr
+def lineup():
+    logger.info("Lineup Requested")
+    if not cached_lineup:  # Refresh lineup if cache is empty
+        refresh_lineup()
+    logger.info("Lineup Delivered")
+    return jsonify(cached_lineup)
 
-    return flask.jsonify(lineup)
+# Endpoint to manually refresh the lineup
+@app.route("/refresh_lineup", methods=["POST"])
+def refresh_lineup_endpoint():
+    refresh_lineup()
+    return jsonify({"status": "Lineup refreshed successfully"})
+
 
 
 if __name__ == "__main__":
