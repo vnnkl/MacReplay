@@ -4,6 +4,7 @@ import shutil
 import time
 from datetime import datetime
 import xml.etree.ElementTree as ET
+import xml.dom.minidom as minidom
 from threading import Thread
 
 # Check if running as a PyInstaller executable
@@ -724,9 +725,9 @@ def generate_playlist():
     if getSettings().get("sort playlist by channel name", "true") == "true":
         channels.sort(key=lambda k: k.split(",")[1].split("\n")[0])
     if getSettings().get("use channel numbers", "true") == "true":
-        if getSettings().get("sort playlist by channel number", "true") == "true":
+        if getSettings().get("sort playlist by channel number", "false") == "true":
             channels.sort(key=lambda k: k.split('tvg-chno="')[1].split('"')[0])
-    if getSettings().get("use channel genres", "false") == "true":
+    if getSettings().get("use channel genres", "true") == "true":
         if getSettings().get("sort playlist by channel genre", "false") == "true":
             channels.sort(key=lambda k: k.split('group-title="')[1].split('"')[0])
 
@@ -846,11 +847,17 @@ def refresh_xmltv():
     for programme in programmes.iter("programme"):
         xmltv.append(programme)
 
+    # Pretty-print the XML
+    rough_string = ET.tostring(xmltv, encoding="unicode")
+    reparsed = minidom.parseString(rough_string)
+    formatted_xmltv = reparsed.toprettyxml(indent="  ")
+
     # Update cache
-    cached_xmltv = ET.tostring(xmltv, encoding="unicode", xml_declaration=True)
+    cached_xmltv = formatted_xmltv
     last_updated = time.time()
     logger.info("XMLTV Refreshed.")
-
+    
+    
 # Endpoint to get the XMLTV data
 @app.route("/xmltv", methods=["GET"])
 @authorise
@@ -1247,7 +1254,6 @@ def discover():
 @app.route("/lineup_status.json", methods=["GET"])
 @hdhr
 def status():
-    logger.info("Channel Lineup Requested.")
     data = {
         "ScanInProgress": 0,
         "ScanPossible": 0,
@@ -1309,11 +1315,12 @@ def refresh_lineup():
                 else:
                     logger.error("Error making lineup for {}, skipping".format(name))
     
-    # Sort lineup by 'GuideNumber' (channel number)
-    lineup.sort(key=lambda x: int(x['GuideNumber']) if x['GuideNumber'].isdigit() else float('inf'))
+    # Sort lineup by GuideNumber
+    lineup.sort(key=lambda x: int(x["GuideNumber"]))
 
     cached_lineup = lineup
     logger.info("Lineup Refreshed.")
+    
     
 # Endpoint to get the current lineup
 @app.route("/lineup.json", methods=["GET"])
