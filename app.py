@@ -417,6 +417,7 @@ def editor():
     # Define tasks to run in the background
     Thread(target=refresh_lineup).start()
     Thread(target=update_playlistm3u).start()
+    Thread(target=refresh_xmltv()).start()
     # Render the template immediately
     return render_template("editor.html")
     
@@ -608,8 +609,9 @@ def editorReset():
     savePortals(portals)
     logger.info("Playlist reset!")
     flash("Playlist reset!", "success")
-    refresh_lineup()
-    update_playlistm3u()
+    Thread(target=refresh_lineup).start()
+    Thread(target=update_playlistm3u).start()
+    Thread(target=refresh_xmltv()).start()
     return redirect("/editor", code=302)
 
 
