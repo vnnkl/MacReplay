@@ -46,7 +46,9 @@ Try switching to a different provider.
 
 ## **Known Issues**
 
-Channel logos may not display when viewed in a browser. This is likely due to browser limitations, possibly related to HTTP files being served on an HTTPS page or how Plex handles it.  
+Channel logos may not display when viewed in a browser. This is likely due to your browsers security, related to HTTP files being served on an HTTPS domain.\
+![Chrome](https://evilvir.us/application/files/2917/3318/2580/chrome_https_issue.png)
+![Frefox](https://evilvir.us/application/files/9217/3318/2583/firefox_https_issue.png)
 
 This issue does not occur with [PLEX HTPC](https://apps.microsoft.com/store/detail/XPFFFF6NN1LZDQ?ocid=pdpshare). To watch from a PC, use [PLEX HTPC](https://apps.microsoft.com/store/detail/XPFFFF6NN1LZDQ?ocid=pdpshare). If any logos are still missing, it means the provider isn't supplying them.
 
