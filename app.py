@@ -778,7 +778,8 @@ def refresh_xmltv():
                 proxy = portals[portal]["proxy"]
                 customChannelNames = portals[portal].get("custom channel names", {})
                 customEpgIds = portals[portal].get("custom epg ids", {})
-
+                customChannelNumbers = portals[portal].get("custom channel numbers", {})
+                
                 for mac in macs:
                     try:
                         token = stb.getToken(url, mac, proxy)
@@ -791,23 +792,29 @@ def refresh_xmltv():
                         epg = None
 
                 if allChannels and epg:
-                    for c in allChannels:
+                    for channel in allChannels:
                         try:
-                            channelId = c.get("id")
+                            channelId = str(channel.get("id"))
                             if str(channelId) in enabledChannels:
-                                channelName = customChannelNames.get(str(channelId))
+                                channelName = customChannelNames.get(channelId)
                                 if channelName is None:
-                                    channelName = str(c.get("name"))
+                                    channelName = channel.get("name")
                                 epgId = customEpgIds.get(channelId)
                                 if epgId is None:
                                     epgId = channelName
+                                    
+                                channelNumber = customChannelNumbers.get(channelId)
+                                if channelNumber is None:
+                                    channelNumber = str(channel.get("number"))                                    
+                                    
+                                    
                                 channelEle = ET.SubElement(
-                                    channels, "channel", id=epgId
+                                    channels, "channel", id=channelNumber
                                 )
                                 ET.SubElement(
                                     channelEle, "display-name"
                                 ).text = channelName
-                                ET.SubElement(channelEle, "icon", src=c.get("logo"))
+                                ET.SubElement(channelEle, "icon", src=channel.get("logo"))
                                 for p in epg.get(channelId):
                                     try:
                                         start = (
@@ -827,7 +834,7 @@ def refresh_xmltv():
                                             "programme",
                                             start=start,
                                             stop=stop,
-                                            channel=epgId,
+                                            channel=channelNumber,
                                         )
                                         ET.SubElement(
                                             programmeEle, "title"
