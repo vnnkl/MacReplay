@@ -138,6 +138,7 @@ defaultSettings = {
     "hdhr name": "MacReplay",
     "hdhr id": str(uuid.uuid4().hex),
     "hdhr tuners": "10",
+    "offset epg hours": "0",
 }
 
 defaultPortal = {
@@ -769,7 +770,12 @@ from xml.dom import minidom
 import time
 
 def refresh_xmltv():
-    epg_offsethours = 1  # Offset in hours
+    settings = getSettings()
+    try:
+        epg_offsethours = int(settings["offset epg hours"])
+    except ValueError:
+        logger.error("The EPG offset value is not a valid integer.")    
+
     global cached_xmltv, last_updated
     logger.info("Refreshing XMLTV...")
     
@@ -796,9 +802,10 @@ def refresh_xmltv():
                         allChannels = stb.getAllChannels(url, mac, token, proxy)
                         epg = stb.getEpg(url, mac, token, 24, proxy)
                         break
-                    except:
+                    except Exception as e:
                         allChannels = None
                         epg = None
+                        logger.error(f"Error fetching data for MAC {mac}: {e}")
 
                 if allChannels and epg:
                     for channel in allChannels:
@@ -847,10 +854,10 @@ def refresh_xmltv():
                                             programmeEle, "desc"
                                         ).text = p.get("descr")
                                     except Exception as e:
-                                        logger.error(f"Error processing programme: {e}")
+                                        logger.error(f"Error processing programme for channel {channelName} (ID: {channelId}): {e}")
                                         pass
                         except Exception as e:
-                            logger.error(f"Error processing channel: {e}")
+                            logger.error(f"|Channel:{channelNumber}|{channelName}| has no EPG data.")
                             pass
                 else:
                     logger.error(f"Error making XMLTV for {name}, skipping")
@@ -869,7 +876,6 @@ def refresh_xmltv():
     cached_xmltv = formatted_xmltv
     last_updated = time.time()
     logger.info("XMLTV Refreshed.")
-    
     
 # Endpoint to get the XMLTV data
 @app.route("/xmltv", methods=["GET"])
