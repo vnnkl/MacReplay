@@ -6,6 +6,18 @@ from datetime import datetime
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as minidom
 from threading import Thread
+import logging
+logger = logging.getLogger("MacReplay")
+logger.setLevel(logging.INFO)
+logFormat = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+fileHandler = logging.FileHandler("MacReplay.log")
+fileHandler.setFormatter(logFormat)
+logger.addHandler(fileHandler)
+consoleFormat = logging.Formatter("[%(levelname)s] %(message)s")
+consoleHandler = logging.StreamHandler()
+consoleHandler.setFormatter(consoleFormat)
+logger.addHandler(consoleHandler)
+
 
 # Check if running as a PyInstaller executable
 if getattr(sys, 'frozen', False):
@@ -32,7 +44,6 @@ import stb
 import json
 import subprocess
 import uuid
-import logging
 import xml.etree.cElementTree as ET
 from flask import (
     Flask,
@@ -51,16 +62,6 @@ import waitress
 app = Flask(__name__)
 app.secret_key = secrets.token_urlsafe(32)
 
-logger = logging.getLogger("MacReplay")
-logger.setLevel(logging.INFO)
-logFormat = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-fileHandler = logging.FileHandler("MacReplay.log")
-fileHandler.setFormatter(logFormat)
-logger.addHandler(fileHandler)
-consoleFormat = logging.Formatter("[%(levelname)s] %(message)s")
-consoleHandler = logging.StreamHandler()
-consoleHandler.setFormatter(consoleFormat)
-logger.addHandler(consoleHandler)
 
 basePath = os.path.abspath(os.getcwd())
 
@@ -123,7 +124,7 @@ defaultSettings = {
     "stream method": "ffmpeg",
     "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -strict experimental -analyzeduration 0 -probesize 32 -copyts -threads 12 pipe:",
     "ffmpeg timeout": "5",
-    "test streams": "true",
+    "test streams": "false",
     "try all macs": "true",
     "use channel genres": "true",
     "use channel numbers": "true",
@@ -1011,7 +1012,7 @@ def channel(portalId, channelId):
                 link = cmd.split(" ")[1]
 
         if link:
-            if getSettings().get("test streams", "true") == "false" or testStream():
+            if getSettings().get("test streams", "false") == "false" or testStream():
                 if web:
                     ffmpegcmd = [
                         ffmpeg_path,
