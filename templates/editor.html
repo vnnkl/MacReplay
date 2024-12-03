@@ -13,7 +13,7 @@
                 <th>Play</th>
                 <th>Name</th>
                 <th>Genre</th>
-                <th>Number</th>
+                <th>Channel</th>
                 <th>EPG ID</th>
                 <th>Fallback For</th>
                 <th>Portal</th>
@@ -246,18 +246,28 @@
                 },
                 {
                     data: "link",
-                    render: function (data, type, row, meta) {
-                        return '<button \
-                            class="btn btn-success btn-block" \
-                            title="Play" \
-                            data-bs-toggle="modal" \
-                            data-bs-target="#videoModal" \
-                            onclick="selectChannel(this)" \
-                            data-channelName="' + row.channelName + '" \
-                            data-customChannelName="' + row.customChannelName + '" \
-                            data-link="' + row.link + '">\
-                            <i class="fa fa-play"></i>\
-                        </button>'
+					render: function (data, type, row, meta) {
+						// Get the current host (e.g., 'localhost:8001' or your live domain)
+						var currentHost = window.location.host;
+
+						// Create a regular expression to remove the protocol (http:// or https://) and the host
+						var strippedLink = row.link.replace(/^https?:\/\/[^\/]+/, "");
+
+						// Construct the new link by adding the current host
+						var newLink = "http://" + currentHost + strippedLink;
+
+						// Return the button HTML with the dynamically constructed URL
+						return '<button \
+							class="btn btn-success btn-block" \
+							title="Play" \
+							data-bs-toggle="modal" \
+							data-bs-target="#videoModal" \
+							onclick="selectChannel(this)" \
+							data-channelName="' + row.channelName + '" \
+							data-customChannelName="' + row.customChannelName + '" \
+							data-link="' + newLink + '">\
+							<i class="fa fa-play"></i>\
+						</button>';
                     }
                 },
                 {
