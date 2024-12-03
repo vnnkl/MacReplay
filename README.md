@@ -1,6 +1,6 @@
 # **MacReplay**
 
-MacReplay is an modified/improved version of [STB-Proxy](https://github.com/Chris230291/STB-Proxy), designed for seamless connectivity between MAC address portals and media platforms like Plex or M3U-based software.  
+MacReplay is an improved version of [STB-Proxy](https://github.com/Chris230291/STB-Proxy), designed for seamless connectivity between MAC address portals and media platforms like Plex or M3U-based software.  
 
 This lightweight solution eliminates the need for Docker by compiling everything into a single executable file, making it easy to use and deploy on Windows systems.
 
