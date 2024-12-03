@@ -2,7 +2,7 @@ import sys
 import os
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as minidom
 from threading import Thread
@@ -763,7 +763,13 @@ def generate_playlist():
     logger.info("Playlist generated and cached.")
     
 # Function to refresh the XMLTV data
+from datetime import datetime, timedelta
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
+import time
+
 def refresh_xmltv():
+    epg_offsethours = 1  # Offset in hours
     global cached_xmltv, last_updated
     logger.info("Refreshing XMLTV...")
     
@@ -806,11 +812,9 @@ def refresh_xmltv():
                                 if channelNumber is None:
                                     channelNumber = str(channel.get("number"))                                    
                                     
-                                    
                                 epgId = customEpgIds.get(channelId)
                                 if epgId is None:
                                     epgId = channelNumber
-                                    
                                     
                                 channelEle = ET.SubElement(
                                     channels, "channel", id=epgId
@@ -821,18 +825,14 @@ def refresh_xmltv():
                                 ET.SubElement(channelEle, "icon", src=channel.get("logo"))
                                 for p in epg.get(channelId):
                                     try:
-                                        start = (
-                                            datetime.utcfromtimestamp(
-                                                p.get("start_timestamp")
-                                            ).strftime("%Y%m%d%H%M%S")
-                                            + " +0000"
-                                        )
-                                        stop = (
-                                            datetime.utcfromtimestamp(
-                                                p.get("stop_timestamp")
-                                            ).strftime("%Y%m%d%H%M%S")
-                                            + " +0000"
-                                        )
+                                        # Add offset to start and stop timestamps
+                                        start_time = datetime.utcfromtimestamp(p.get("start_timestamp")) + timedelta(hours=epg_offsethours)
+                                        stop_time = datetime.utcfromtimestamp(p.get("stop_timestamp")) + timedelta(hours=epg_offsethours)
+                                        
+                                        # Format the time, making sure it's adjusted correctly
+                                        start = start_time.strftime("%Y%m%d%H%M%S") + " +0000"
+                                        stop = stop_time.strftime("%Y%m%d%H%M%S") + " +0000"
+                                        
                                         programmeEle = ET.SubElement(
                                             programmes,
                                             "programme",
@@ -846,12 +846,14 @@ def refresh_xmltv():
                                         ET.SubElement(
                                             programmeEle, "desc"
                                         ).text = p.get("descr")
-                                    except:
+                                    except Exception as e:
+                                        logger.error(f"Error processing programme: {e}")
                                         pass
-                        except:
+                        except Exception as e:
+                            logger.error(f"Error processing channel: {e}")
                             pass
                 else:
-                    logger.error("Error making XMLTV for {}, skipping".format(name))
+                    logger.error(f"Error making XMLTV for {name}, skipping")
 
     # Combine channels and programmes into a single XML document
     xmltv = channels
