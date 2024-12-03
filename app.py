@@ -419,11 +419,11 @@ def portalRemove():
 @app.route("/editor", methods=["GET"])
 @authorise
 def editor():
-    # Define tasks to run in the background
+    # These will run before and after the editor is saved.
     Thread(target=refresh_lineup).start()
-    Thread(target=update_playlistm3u).start()
     Thread(target=refresh_xmltv).start()
-    # Render the template immediately
+    last_playlist_host = None     # The playlist will be updated next time it is downloaded
+    # Render the template
     return render_template("editor.html")
     
 
@@ -614,10 +614,6 @@ def editorReset():
     savePortals(portals)
     logger.info("Playlist reset!")
     flash("Playlist reset!", "success")
-    refresh_lineup()
-    update_playlistm3u()
-    refresh_xmltv()
-    
     return redirect("/editor", code=302)
 
 
