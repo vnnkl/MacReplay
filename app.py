@@ -802,17 +802,18 @@ def refresh_xmltv():
                                 channelName = customChannelNames.get(channelId)
                                 if channelName is None:
                                     channelName = channel.get("name")
-                                epgId = customEpgIds.get(channelId)
-                                if epgId is None:
-                                    epgId = channelName
-                                    
                                 channelNumber = customChannelNumbers.get(channelId)
                                 if channelNumber is None:
                                     channelNumber = str(channel.get("number"))                                    
                                     
                                     
+                                epgId = customEpgIds.get(channelId)
+                                if epgId is None:
+                                    epgId = channelNumber
+                                    
+                                    
                                 channelEle = ET.SubElement(
-                                    channels, "channel", id=channelNumber
+                                    channels, "channel", id=epgId
                                 )
                                 ET.SubElement(
                                     channelEle, "display-name"
@@ -837,7 +838,7 @@ def refresh_xmltv():
                                             "programme",
                                             start=start,
                                             stop=stop,
-                                            channel=channelNumber,
+                                            channel=epgId,
                                         )
                                         ET.SubElement(
                                             programmeEle, "title"
