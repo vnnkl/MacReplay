@@ -90,7 +90,7 @@ occupied = {}
 config = {}
 cached_lineup = []
 cached_playlist = None
-
+last_playlist_host = None
 cached_xmltv = None
 last_updated = 0
 
@@ -644,11 +644,38 @@ def save():
     flash("Settings saved!", "success")
     return redirect("/settings", code=302)
 
+# Route to serve the cached playlist.m3u
+@app.route("/playlist.m3u", methods=["GET"])
+@authorise
+def playlist():
+    global cached_playlist, last_playlist_host
+    
+    logger.info("Playlist Requested")
+    
+    # Detect the current host dynamically
+    current_host = request.host or "127.0.0.1"
+    
+    # Regenerate the playlist if it is empty or the host has changed
+    if cached_playlist is None or len(cached_playlist) == 0 or last_playlist_host != current_host:
+        logger.info(f"Regenerating playlist due to host change: {last_playlist_host} -> {current_host}")
+        last_playlist_host = current_host
+        generate_playlist()
+
+    return Response(cached_playlist, mimetype="text/plain")
+
+# Function to manually trigger playlist update
+@app.route("/update_playlistm3u", methods=["POST"])
+def update_playlistm3u():
+    generate_playlist()
+    return Response("Playlist updated successfully", status=200)
 
 def generate_playlist():
     global cached_playlist
     logger.info("Generating playlist.m3u...")
 
+    # Detect the host dynamically from the request
+    playlist_host = request.host or "127.0.0.1"
+    
     channels = []
     portals = getPortals()
 
@@ -713,7 +740,7 @@ def generate_playlist():
                                 + channelName
                                 + "\n"
                                 + "http://"
-                                + host
+                                + playlist_host  # Use the dynamically detected playlist host
                                 + "/play/"
                                 + portal
                                 + "/"
@@ -738,28 +765,7 @@ def generate_playlist():
     # Update the cache
     cached_playlist = playlist
     logger.info("Playlist generated and cached.")
-
-# Route to serve the cached playlist.m3u
-@app.route("/playlist.m3u", methods=["GET"])
-@authorise
-def playlist():
-    global cached_playlist
     
-    logger.info("Playlist Requested")
-    
-    # If the playlist is empty, regenerate it
-    if cached_playlist is None or len(cached_playlist) == 0:
-        generate_playlist()
-
-    return Response(cached_playlist, mimetype="text/plain")
-
-# Function to manually trigger playlist update
-@app.route("/update_playlistm3u", methods=["POST"])
-def update_playlistm3u():
-    generate_playlist()
-    return Response("Playlist updated successfully", status=200)
-
-
 # Function to refresh the XMLTV data
 def refresh_xmltv():
     global cached_xmltv, last_updated
