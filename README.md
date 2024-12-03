@@ -1,6 +1,6 @@
 # **MacReplay**
 
-MacReplay is an modified/improved version of [STB-Proxy](https://github.com/Chris230291/STB-Proxy), designed for seamless connectivity between MAC address portals and media platforms like Plex or M3U-based software.  
+MacReplay is an improved version of [STB-Proxy](https://github.com/Chris230291/STB-Proxy), designed for seamless connectivity between MAC address portals and media platforms like Plex or M3U-based software.  
 
 This lightweight solution eliminates the need for Docker by compiling everything into a single executable file, making it easy to use and deploy on Windows systems.
 
@@ -36,11 +36,13 @@ To use MacReplay, ensure you have the following:
 ---
 
 ## Troubleshooting
-
-If the TV guide is not being populated:
-Check the [XMLTV guide](http://192.168.1.88:8001/xmltv).
-If it is just the list of channels with nothing below them, the provider likely does not supply a guide.
+**The TV guide is not being populated:**\
+Check the [XMLTV guide](http://127.0.0.1:8001/xmltv).
+If it is just shows the list of channels with nothing below them, the provider likely does not supply a guide.
 Try switching to a different provider.
+
+**I've modified the channels, but Plex isn't changing:**\
+you must delete the dvr from plex, and re add it.
 
 ---
 
