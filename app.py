@@ -638,6 +638,7 @@ def save():
 
     saveSettings(settings)
     logger.info("Settings saved!")
+    Thread(target=refresh_xmltv).start()
     flash("Settings saved!", "success")
     return redirect("/settings", code=302)
 
