@@ -10,8 +10,20 @@ import logging
 logger = logging.getLogger("MacReplay")
 logger.setLevel(logging.INFO)
 logFormat = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-fileHandler = logging.FileHandler("MacReplay.log")
+
+
+home_dir = os.path.expanduser("~")  # Get the user's home directory
+log_dir = os.path.join(home_dir, "Evilvir.us")  # Subdirectory for logs
+# Create the directory if it doesn't already exist
+os.makedirs(log_dir, exist_ok=True)
+# Full path to the log file
+log_file_path = os.path.join(log_dir, "MacReplay.log")
+# Set up the FileHandler
+fileHandler = logging.FileHandler(log_file_path)
 fileHandler.setFormatter(logFormat)
+
+
+
 logger.addHandler(fileHandler)
 consoleFormat = logging.Formatter("[%(levelname)s] %(message)s")
 consoleHandler = logging.StreamHandler()
@@ -85,7 +97,7 @@ os.makedirs(os.path.dirname(configFile), exist_ok=True)
 
 logger.info(f"Using config file: {configFile}")
 
-
+global cached_xmltv, last_updated
 occupied = {}
 config = {}
 cached_lineup = []
@@ -138,7 +150,6 @@ defaultSettings = {
     "hdhr name": "MacReplay",
     "hdhr id": str(uuid.uuid4().hex),
     "hdhr tuners": "10",
-    "offset epg hours": "0",
 }
 
 defaultPortal = {
@@ -147,6 +158,7 @@ defaultPortal = {
     "url": "",
     "macs": {},
     "streams per mac": "1",
+    "epg offset": "0",
     "proxy": "",
     "enabled channels": [],
     "custom channel names": {},
@@ -268,12 +280,14 @@ def portals():
 @app.route("/portal/add", methods=["POST"])
 @authorise
 def portalsAdd():
+    cached_xmltv = None
     id = uuid.uuid4().hex
     enabled = "true"
     name = request.form["name"]
     url = request.form["url"]
     macs = list(set(request.form["macs"].split(",")))
     streamsPerMac = request.form["streams per mac"]
+    epgOffset = request.form["epg offset"]
     proxy = request.form["proxy"]
 
     if not url.endswith(".php"):
@@ -311,6 +325,7 @@ def portalsAdd():
             "url": url,
             "macs": macsd,
             "streams per mac": streamsPerMac,
+            "epg offset": epgOffset,
             "proxy": proxy,
         }
 
@@ -336,12 +351,14 @@ def portalsAdd():
 @app.route("/portal/update", methods=["POST"])
 @authorise
 def portalUpdate():
+    cached_xmltv = None
     id = request.form["id"]
     enabled = request.form.get("enabled", "false")
     name = request.form["name"]
     url = request.form["url"]
     newmacs = list(set(request.form["macs"].split(",")))
     streamsPerMac = request.form["streams per mac"]
+    epgOffset = request.form["epg offset"]
     proxy = request.form["proxy"]
     retest = request.form.get("retest", None)
 
@@ -389,6 +406,7 @@ def portalUpdate():
         portals[id]["url"] = url
         portals[id]["macs"] = macsout
         portals[id]["streams per mac"] = streamsPerMac
+        portals[id]["epg offset"] = epgOffset
         portals[id]["proxy"] = proxy
         savePortals(portals)
         logger.info("Portal({}) updated!".format(name))
@@ -772,12 +790,7 @@ import time
 
 def refresh_xmltv():
     settings = getSettings()
-    try:
-        epg_offsethours = int(settings["offset epg hours"])
-    except ValueError:
-        logger.error("The EPG offset value is not a valid integer.")    
 
-    global cached_xmltv, last_updated
     logger.info("Refreshing XMLTV...")
     
     channels = ET.Element("tv")
@@ -786,6 +799,10 @@ def refresh_xmltv():
     
     for portal in portals:
         if portals[portal]["enabled"] == "true":
+            portal_name = portals[portal]["name"]
+            portal_epg_offset = int(portals[portal]["epg offset"])
+            logger.info(f"Fetching EPG | Portal: {portal_name} | offset: {portal_epg_offset} |")
+       
             enabledChannels = portals[portal].get("enabled channels", [])
             if len(enabledChannels) != 0:
                 name = portals[portal]["name"]
@@ -834,8 +851,8 @@ def refresh_xmltv():
                                 for p in epg.get(channelId):
                                     try:
                                         # Add offset to start and stop timestamps
-                                        start_time = datetime.utcfromtimestamp(p.get("start_timestamp")) + timedelta(hours=epg_offsethours)
-                                        stop_time = datetime.utcfromtimestamp(p.get("stop_timestamp")) + timedelta(hours=epg_offsethours)
+                                        start_time = datetime.utcfromtimestamp(p.get("start_timestamp")) + timedelta(hours=portal_epg_offset)
+                                        stop_time = datetime.utcfromtimestamp(p.get("stop_timestamp")) + timedelta(hours=portal_epg_offset)
                                         
                                         # Format the time, making sure it's adjusted correctly
                                         start = start_time.strftime("%Y%m%d%H%M%S") + " +0000"
@@ -858,7 +875,7 @@ def refresh_xmltv():
                                         logger.error(f"Error processing programme for channel {channelName} (ID: {channelId}): {e}")
                                         pass
                         except Exception as e:
-                            logger.error(f"|Channel:{channelNumber}|{channelName}| has no EPG data.")
+                            logger.error(f"| Channel:{channelNumber} | {channelName} | has no EPG data.")
                             pass
                 else:
                     logger.error(f"Error making XMLTV for {name}, skipping")

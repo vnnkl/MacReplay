@@ -24,6 +24,7 @@
                     data-url="{{ portals[portal].url }}" data-proxy="{{ portals[portal].proxy }}"
                     data-macs="{{ portals[portal].macs|join(',') }}"
                     data-streamsPerMac="{{ portals[portal]['streams per mac'] }}" data-bs-toggle="modal"
+                    data-EpgOffset="{{ portals[portal]['epg offset'] }}" data-bs-toggle="modal"
                     data-bs-target="#modalEdit">
                     <i class="me-2 fa fa-server"{{ "hidden" if portals[portal].enabled =='false' }}></i>
                     <i class="me-2 fa fa-ban"{{ "hidden" if portals[portal].enabled =='true' }}></i>
@@ -62,47 +63,53 @@
             </div>
             <div class="modal-body">
 
-                <form action="/portal/add" method="post">
+				<form action="/portal/add" method="post">
 
-                    <h6>Name:</h6>
-                    <input type="text" name="name" class="form-control flex-fill" title="Name" required>
-                    <span class="text-muted">Give this portal a name.</span>
+					<h6>Name:</h6>
+					<input type="text" name="name" class="form-control flex-fill" title="Name" required>
+					<span class="text-muted">Give this portal a name.</span>
 
-                    <br><br>
+					<br><br>
 
-                    <h6>URL:</h6>
-                    <input type="text" name="url" class="form-control flex-fill" title="URL" required>
-                    <span class="text-muted">Its best to enter the full address ending in .php if you know
-                        it.<br>If
-                        not MacReplay will attempt to figure it out for you.</span>
+					<h6>URL:</h6>
+					<input type="text" name="url" class="form-control flex-fill" title="URL" required>
+					<span class="text-muted">It's best to enter the full address ending in .php if you know it.<br>If not, MacReplay will attempt to figure it out for you.</span>
 
-                    <br><br>
+					<br><br>
 
-                    <h6>Proxy:</h6>
-                    <input type="text" name="proxy" class="form-control flex-fill" title="Proxy">
-                    <span class="text-muted">MacReplay supports HTTP proxies only.</span>
+					<h6>Proxy:</h6>
+					<input type="text" name="proxy" class="form-control flex-fill" title="Proxy">
+					<span class="text-muted">MacReplay supports HTTP proxies only.</span>
 
-                    <br><br>
+					<br><br>
 
-                    <h6>MACs:</h6>
-                    <input type="text" name="macs" class="form-control flex-fill" title="MACs" required>
-                    <span class="text-muted">Enter a comma seperated list of MAC adresses.</span>
+					<h6>MACs:</h6>
+					<input type="text" name="macs" class="form-control flex-fill" title="MACs" required>
+					<span class="text-muted">Enter a comma-separated list of MAC addresses.</span>
 
-                    <br><br>
+					<br><br>
 
-                    <h6>Streams Per MAC:</h6>
-                    <input type="number" name="streams per mac" class="form-control flex-fill" title="Streams Per Mac"
-                        min="0" value="1" required>
-                    <span class="text-muted">How many streams does each MAC allow. 0 = unlimited.</span>
+					<div class="row">
+						<div class="col">
+							<h6>Streams Per MAC:</h6>
+							<input type="number" name="streams_per_mac" class="form-control" title="Streams Per MAC" min="0" value="1" required>
+							<span class="text-muted">How many streams does each MAC allow. 0 = unlimited.</span>
+						</div>
+						<div class="col">
+							<h6>EPG Offset:</h6>
+							<input type="number" name="epg offset" class="form-control" title="EPG Offset" min="0" value="0" required>
+							<span class="text-muted">Specify the EPG offset in hours.</span>
+						</div>
+					</div>
 
-                    <br><br>
+					<br>
 
-                    <div class="modal-footer">
-                        <button class="btn btn-secondary" title="Cancel" data-bs-dismiss="modal">Cancel</button>
-                        <button class="btn btn-success btn-block" title="Add">Add</button>
-                    </div>
+					<div class="modal-footer">
+						<button class="btn btn-secondary" title="Cancel" data-bs-dismiss="modal">Cancel</button>
+						<button class="btn btn-success btn-block" title="Add">Add</button>
+					</div>
 
-                </form>
+				</form>
 
             </div>
         </div>
@@ -153,10 +160,23 @@
 
                     <br><br>
 
-                    <h6>Streams Per MAC:</h6>
-                    <input type="number" name="streams per mac" id="editStreamsPerMac" class="form-control flex-fill"
+					<div class="row">
+						<div class="col">
+							<h6>Streams Per MAC:</h6>
+							<input type="number" name="streams per mac" id="editStreamsPerMac" class="form-control flex-fill"
                         title="Streams Per MAC" min="0" required>
-                    <span class="text-muted">How many streams does each MAC allow. 0 = unlimited.</span>
+							<span class="text-muted">How many streams does each MAC allow. 0 = unlimited.</span>
+						</div>
+						<div class="col">
+							<h6>EPG Offset:</h6>
+							<input type="number" name="epg offset" id="editepgOffset" class="form-control flex-fill"
+						title="EPG Offset" required>
+							<span class="text-muted">Offset the program guide in hours.</span>
+						</div>
+					</div>
+
+
+
 
                     <br><br>
 
@@ -206,6 +226,7 @@
         var proxy = button.getAttribute('data-proxy');
         var macs = button.getAttribute('data-macs');
         var streamsPerMac = button.getAttribute('data-streamsPerMac');
+        var epgOffset = button.getAttribute('data-EpgOffset');
         document.getElementById('editId').value = id;
         if (enabled == "true") {
             document.getElementById('editEnabled').checked = true;
@@ -217,6 +238,7 @@
         document.getElementById('editProxy').value = proxy;
         document.getElementById('editMacs').value = macs;
         document.getElementById('editStreamsPerMac').value = streamsPerMac;
+        document.getElementById('editepgOffset').value = epgOffset;
         document.getElementById('deleteId').value = id;
         document.getElementById('deleteName').value = name;
         document.getElementById('retest').checked = false;
