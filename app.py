@@ -438,11 +438,6 @@ def portalRemove():
 @app.route("/editor", methods=["GET"])
 @authorise
 def editor():
-    # These will run before and after the editor is saved.
-    Thread(target=refresh_lineup).start()
-    Thread(target=refresh_xmltv).start()
-    last_playlist_host = None     # The playlist will be updated next time it is downloaded
-    # Render the template
     return render_template("editor.html")
     
 
@@ -543,6 +538,9 @@ def editor_data():
 @app.route("/editor/save", methods=["POST"])
 @authorise
 def editorSave():
+    cached_xmltv = None # The tv guide will be updated next time its downloaded
+    last_playlist_host = None     # The playlist will be updated next time it is downloaded
+    Thread(target=refresh_lineup).start() # Update the channel lineup for plex.
     enabledEdits = json.loads(request.form["enabledEdits"])
     numberEdits = json.loads(request.form["numberEdits"])
     nameEdits = json.loads(request.form["nameEdits"])
