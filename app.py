@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as minidom
+import threading
 from threading import Thread
 import logging
 logger = logging.getLogger("MacReplay")
@@ -97,7 +98,6 @@ os.makedirs(os.path.dirname(configFile), exist_ok=True)
 
 logger.info(f"Using config file: {configFile}")
 
-global cached_xmltv, last_updated
 occupied = {}
 config = {}
 cached_lineup = []
@@ -280,6 +280,7 @@ def portals():
 @app.route("/portal/add", methods=["POST"])
 @authorise
 def portalsAdd():
+    global cached_xmltv
     cached_xmltv = None
     id = uuid.uuid4().hex
     enabled = "true"
@@ -351,6 +352,7 @@ def portalsAdd():
 @app.route("/portal/update", methods=["POST"])
 @authorise
 def portalUpdate():
+    global cached_xmltv
     cached_xmltv = None
     id = request.form["id"]
     enabled = request.form.get("enabled", "false")
@@ -538,6 +540,7 @@ def editor_data():
 @app.route("/editor/save", methods=["POST"])
 @authorise
 def editorSave():
+    global cached_xmltv
     cached_xmltv = None # The tv guide will be updated next time its downloaded
     last_playlist_host = None     # The playlist will be updated next time it is downloaded
     Thread(target=refresh_lineup).start() # Update the channel lineup for plex.
@@ -889,16 +892,18 @@ def refresh_xmltv():
     formatted_xmltv = reparsed.toprettyxml(indent="  ")
 
     # Update cache
+    global cached_xmltv, last_updated
     cached_xmltv = formatted_xmltv
     last_updated = time.time()
     logger.info("XMLTV Refreshed.")
+    
+    logger.debug(f"Generated XMLTV: {formatted_xmltv}")
     
 # Endpoint to get the XMLTV data
 @app.route("/xmltv", methods=["GET"])
 @authorise
 def xmltv():
     global cached_xmltv, last_updated
-    
     logger.info("Guide Requested")
     
     # Check if the cached XMLTV data is older than 15 minutes
@@ -1374,10 +1379,19 @@ def refresh_lineup_endpoint():
     refresh_lineup()
     return jsonify({"status": "Lineup refreshed successfully"})
 
-
-
+def start_refresh():
+    # Run refresh_lineup in a separate thread
+    threading.Thread(target=refresh_lineup, daemon=True).start()
+    threading.Thread(target=refresh_xmltv, daemon=True).start()
+    
+    
 if __name__ == "__main__":
     config = loadConfig()
+
+    # Start the refresh thread before the server
+    start_refresh()
+
+    # Start the server
     if "TERM_PROGRAM" in os.environ.keys() and os.environ["TERM_PROGRAM"] == "vscode":
         app.run(host="0.0.0.0", port=8001, debug=True)
     else:
