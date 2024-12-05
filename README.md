@@ -44,6 +44,9 @@ Try switching to a different provider.
 **I've modified the channels, but Plex isn't changing:**\
 you must delete the dvr from plex, and re add it.
 
+**Error getting channel data for [Portal], skipping** or **Error making XMLTV for [Portal], skipping**
+Go to the portals page, select the malfunctioning portal and click retest. You have an expired mac address, and it was trying to use it to download the data.
+
 ---
 
 ## **Known Issues**
