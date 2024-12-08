@@ -783,27 +783,51 @@ def generate_playlist():
     cached_playlist = playlist
     logger.info("Playlist generated and cached.")
     
-# Function to refresh the XMLTV data
-from datetime import datetime, timedelta
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
-import time
-
 def refresh_xmltv():
     settings = getSettings()
-
     logger.info("Refreshing XMLTV...")
-    
+
+    # Set up paths for XMLTV cache
+    user_dir = os.path.expanduser("~")
+    cache_dir = os.path.join(user_dir, "Evilvir.us")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, "MacReplayEPG.xml")
+
+    # Define date cutoff for programme filtering
+    day_before_yesterday = datetime.utcnow() - timedelta(days=2)
+    day_before_yesterday_str = day_before_yesterday.strftime("%Y%m%d%H%M%S") + " +0000"
+
+    # Load existing cache if it exists
+    cached_programmes = []
+    if os.path.exists(cache_file):
+        try:
+            tree = ET.parse(cache_file)
+            root = tree.getroot()
+            for programme in root.findall("programme"):
+                stop_attr = programme.get("stop")  # Get the 'stop' attribute
+                if stop_attr:
+                    try:
+                        # Parse the stop time and compare with the cutoff
+                        stop_time = datetime.strptime(stop_attr.split(" ")[0], "%Y%m%d%H%M%S")
+                        if stop_time >= day_before_yesterday:  # Keep only recent programmes
+                            cached_programmes.append(ET.tostring(programme, encoding="unicode"))
+                    except ValueError as e:
+                        logger.warning(f"Invalid stop time format in cached programme: {stop_attr}. Skipping.")
+            logger.info("Loaded existing programme data from cache.")
+        except Exception as e:
+            logger.error(f"Failed to load cache file: {e}")
+
+    # Initialize new XMLTV data
     channels = ET.Element("tv")
     programmes = ET.Element("tv")
     portals = getPortals()
-    
+
     for portal in portals:
         if portals[portal]["enabled"] == "true":
             portal_name = portals[portal]["name"]
             portal_epg_offset = int(portals[portal]["epg offset"])
             logger.info(f"Fetching EPG | Portal: {portal_name} | offset: {portal_epg_offset} |")
-       
+
             enabledChannels = portals[portal].get("enabled channels", [])
             if len(enabledChannels) != 0:
                 name = portals[portal]["name"]
@@ -813,7 +837,7 @@ def refresh_xmltv():
                 customChannelNames = portals[portal].get("custom channel names", {})
                 customEpgIds = portals[portal].get("custom epg ids", {})
                 customChannelNumbers = portals[portal].get("custom channel numbers", {})
-                
+
                 for mac in macs:
                     try:
                         token = stb.getToken(url, mac, proxy)
@@ -831,52 +855,54 @@ def refresh_xmltv():
                         try:
                             channelId = str(channel.get("id"))
                             if str(channelId) in enabledChannels:
-                                channelName = customChannelNames.get(channelId)
-                                if channelName is None:
-                                    channelName = channel.get("name")
-                                channelNumber = customChannelNumbers.get(channelId)
-                                if channelNumber is None:
-                                    channelNumber = str(channel.get("number"))                                    
-                                    
-                                epgId = customEpgIds.get(channelId)
-                                if epgId is None:
-                                    epgId = channelNumber
-                                    
+                                channelName = customChannelNames.get(channelId, channel.get("name"))
+                                channelNumber = customChannelNumbers.get(channelId, str(channel.get("number")))
+                                epgId = customEpgIds.get(channelId, channelNumber)
+
                                 channelEle = ET.SubElement(
                                     channels, "channel", id=epgId
                                 )
-                                ET.SubElement(
-                                    channelEle, "display-name"
-                                ).text = channelName
+                                ET.SubElement(channelEle, "display-name").text = channelName
                                 ET.SubElement(channelEle, "icon", src=channel.get("logo"))
-                                for p in epg.get(channelId):
-                                    try:
-                                        # Add offset to start and stop timestamps
-                                        start_time = datetime.utcfromtimestamp(p.get("start_timestamp")) + timedelta(hours=portal_epg_offset)
-                                        stop_time = datetime.utcfromtimestamp(p.get("stop_timestamp")) + timedelta(hours=portal_epg_offset)
-                                        
-                                        # Format the time, making sure it's adjusted correctly
-                                        start = start_time.strftime("%Y%m%d%H%M%S") + " +0000"
-                                        stop = stop_time.strftime("%Y%m%d%H%M%S") + " +0000"
-                                        
-                                        programmeEle = ET.SubElement(
-                                            programmes,
-                                            "programme",
-                                            start=start,
-                                            stop=stop,
-                                            channel=epgId,
-                                        )
-                                        ET.SubElement(
-                                            programmeEle, "title"
-                                        ).text = p.get("name")
-                                        ET.SubElement(
-                                            programmeEle, "desc"
-                                        ).text = p.get("descr")
-                                    except Exception as e:
-                                        logger.error(f"Error processing programme for channel {channelName} (ID: {channelId}): {e}")
-                                        pass
+
+                                if channelId not in epg or not epg.get(channelId):
+                                    logger.warning(f"No EPG data found for channel {channelName} (ID: {channelId}), Creating a Dummy EPG item.")
+                                    start_time = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+                                    stop_time = start_time + timedelta(hours=24)
+                                    start = start_time.strftime("%Y%m%d%H%M%S") + " +0000"
+                                    stop = stop_time.strftime("%Y%m%d%H%M%S") + " +0000"
+                                    programmeEle = ET.SubElement(
+                                        programmes,
+                                        "programme",
+                                        start=start,
+                                        stop=stop,
+                                        channel=epgId,
+                                    )
+                                    ET.SubElement(programmeEle, "title").text = channelName
+                                    ET.SubElement(programmeEle, "desc").text = channelName
+                                else:
+                                    for p in epg.get(channelId):
+                                        try:
+                                            start_time = datetime.utcfromtimestamp(p.get("start_timestamp")) + timedelta(hours=portal_epg_offset)
+                                            stop_time = datetime.utcfromtimestamp(p.get("stop_timestamp")) + timedelta(hours=portal_epg_offset)
+                                            start = start_time.strftime("%Y%m%d%H%M%S") + " +0000"
+                                            stop = stop_time.strftime("%Y%m%d%H%M%S") + " +0000"
+                                            if start <= day_before_yesterday_str:
+                                                continue
+                                            programmeEle = ET.SubElement(
+                                                programmes,
+                                                "programme",
+                                                start=start,
+                                                stop=stop,
+                                                channel=epgId,
+                                            )
+                                            ET.SubElement(programmeEle, "title").text = p.get("name")
+                                            ET.SubElement(programmeEle, "desc").text = p.get("descr")
+                                        except Exception as e:
+                                            logger.error(f"Error processing programme for channel {channelName} (ID: {channelId}): {e}")
+                                            pass
                         except Exception as e:
-                            logger.error(f"| Channel:{channelNumber} | {channelName} | has no EPG data.")
+                            logger.error(f"| Channel:{channelNumber} | {channelName} | {e}")
                             pass
                 else:
                     logger.error(f"Error making XMLTV for {name}, skipping")
@@ -886,17 +912,26 @@ def refresh_xmltv():
     for programme in programmes.iter("programme"):
         xmltv.append(programme)
 
-    # Pretty-print the XML
+    # Add cached programmes, ensuring no duplicates
+    existing_programme_hashes = {ET.tostring(p, encoding="unicode") for p in xmltv.findall("programme")}
+    for cached in cached_programmes:
+        if cached not in existing_programme_hashes:
+            xmltv.append(ET.fromstring(cached))
+
+    # Pretty-print the XML with blank line removal
     rough_string = ET.tostring(xmltv, encoding="unicode")
     reparsed = minidom.parseString(rough_string)
-    formatted_xmltv = reparsed.toprettyxml(indent="  ")
+    formatted_xmltv = "\n".join([line for line in reparsed.toprettyxml(indent="  ").splitlines() if line.strip()])
 
-    # Update cache
+    # Save updated cache
+    with open(cache_file, "w", encoding="utf-8") as f:
+        f.write(formatted_xmltv)
+    logger.info("XMLTV cache updated.")
+
+    # Update global cache
     global cached_xmltv, last_updated
     cached_xmltv = formatted_xmltv
     last_updated = time.time()
-    logger.info("XMLTV Refreshed.")
-    
     logger.debug(f"Generated XMLTV: {formatted_xmltv}")
     
 # Endpoint to get the XMLTV data
