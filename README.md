@@ -57,6 +57,9 @@ Channel logos may not display when viewed in a browser. This is likely due to yo
 
 This issue does not occur with [PLEX HTPC](https://apps.microsoft.com/store/detail/XPFFFF6NN1LZDQ?ocid=pdpshare), the mobile apps, or the TV app. To watch from a PC, use [PLEX HTPC](https://apps.microsoft.com/store/detail/XPFFFF6NN1LZDQ?ocid=pdpshare). If any logos are still missing, it means the provider isn't supplying them.
 
+Another note about Plex HTPC, you must enable **Force Direct Play** in the settings.
+![HTPC Settings](https://evilvir.us/application/files/5117/3368/8848/htpcsettings.png)
+
 ---
 
 ## **Credits**
