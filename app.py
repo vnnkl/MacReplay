@@ -542,7 +542,7 @@ def editor_data():
 def editorSave():
     global cached_xmltv
     #cached_xmltv = None # The tv guide will be updated next time its downloaded
-    refresh_xmltv() #Force update
+    threading.Thread(target=refresh_xmltv, daemon=True).start() #Force update in a seperate thread
     last_playlist_host = None     # The playlist will be updated next time it is downloaded
     Thread(target=refresh_lineup).start() # Update the channel lineup for plex.
     enabledEdits = json.loads(request.form["enabledEdits"])
