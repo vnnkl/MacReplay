@@ -136,7 +136,7 @@ defaultSettings = {
     "stream method": "ffmpeg",
     "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -strict experimental -analyzeduration 0 -probesize 32 -copyts -threads 12 pipe:",
     "ffmpeg timeout": "5",
-    "test streams": "false",
+    "test streams": "true",
     "try all macs": "true",
     "use channel genres": "true",
     "use channel numbers": "true",
@@ -1080,7 +1080,7 @@ def channel(portalId, channelId):
                 link = cmd.split(" ")[1]
 
         if link:
-            if getSettings().get("test streams", "false") == "false" or testStream():
+            if getSettings().get("test streams", "true") == "false" or testStream():
                 if web:
                     ffmpegcmd = [
                         ffmpeg_path,
