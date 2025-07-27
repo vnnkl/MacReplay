@@ -2,6 +2,7 @@ import sys
 import os
 import shutil
 import time
+import subprocess
 from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as minidom
@@ -23,33 +24,20 @@ log_file_path = os.path.join(log_dir, "MacReplay.log")
 fileHandler = logging.FileHandler(log_file_path)
 fileHandler.setFormatter(logFormat)
 
-
-
 logger.addHandler(fileHandler)
 consoleFormat = logging.Formatter("[%(levelname)s] %(message)s")
 consoleHandler = logging.StreamHandler()
 consoleHandler.setFormatter(consoleFormat)
 logger.addHandler(consoleHandler)
 
-
-# Check if running as a PyInstaller executable
-if getattr(sys, 'frozen', False):
-    # If running as a PyInstaller executable, use _MEIPASS for the temp folder
-    app_dir = sys._MEIPASS
-else:
-    # If running as a regular script, use the script's current directory
-    app_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Paths to ffmpeg.exe and ffprobe.exe in the root folder
-ffmpeg_path = os.path.join(app_dir, 'ffmpeg', 'ffmpeg.exe')
-ffprobe_path = os.path.join(app_dir, 'ffmpeg', 'ffprobe.exe')
-
-# Check if the files exist (for debugging purposes)
-if not os.path.exists(ffmpeg_path) or not os.path.exists(ffprobe_path):
-    logger.error("Error: ffmpeg.exe or ffprobe.exe not found!")
-#else:
-#    print(f"Found ffmpeg at {ffmpeg_path}")
-#    print(f"Found ffprobe at {ffprobe_path}")
+# Use system-installed ffmpeg and ffprobe (like STB-Proxy does)
+# Check if the binaries exist
+try:
+    subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+    subprocess.run(["ffprobe", "-version"], capture_output=True, check=True)
+    logger.info("FFmpeg and FFprobe found and working")
+except (subprocess.CalledProcessError, FileNotFoundError):
+    logger.error("Error: ffmpeg or ffprobe not found! Please install ffmpeg.")
 
 import flask
 from flask import Flask, jsonify
@@ -81,7 +69,7 @@ basePath = os.path.abspath(os.getcwd())
 if os.getenv("HOST"):
     host = os.getenv("HOST")
 else:
-    host = "127.0.0.1:8001"
+    host = "ubuntu.verbergwest.appboxes.co:13681"
 logger.info(f"Server started on http://{host}")
 
 # Get the base path for the user directory
@@ -671,7 +659,7 @@ def playlist():
     logger.info("Playlist Requested")
     
     # Detect the current host dynamically
-    current_host = request.host or "127.0.0.1"
+    current_host = host
     
     # Regenerate the playlist if it is empty or the host has changed
     if cached_playlist is None or len(cached_playlist) == 0 or last_playlist_host != current_host:
@@ -692,7 +680,7 @@ def generate_playlist():
     logger.info("Generating playlist.m3u...")
 
     # Detect the host dynamically from the request
-    playlist_host = request.host or "127.0.0.1"
+    playlist_host = host
     
     channels = []
     portals = getPortals()
@@ -1007,7 +995,7 @@ def channel(portalId, channelId):
 
     def testStream():
         timeout = int(getSettings()["ffmpeg timeout"]) * int(1000000)
-        ffprobecmd = [ffprobe_path, "-timeout", str(timeout), "-i", link]
+        ffprobecmd = ["ffprobe", "-timeout", str(timeout), "-i", link]
 
         if proxy:
             ffprobecmd.insert(1, "-http_proxy")
@@ -1083,7 +1071,7 @@ def channel(portalId, channelId):
             if getSettings().get("test streams", "true") == "false" or testStream():
                 if web:
                     ffmpegcmd = [
-                        ffmpeg_path,
+                        "ffmpeg",
                         "-loglevel",
                         "panic",
                         "-hide_banner",
@@ -1104,7 +1092,7 @@ def channel(portalId, channelId):
 
                 else:
                     if getSettings().get("stream method", "ffmpeg") == "ffmpeg":
-                        ffmpegcmd = f"{ffmpeg_path} {getSettings()['ffmpeg command']}"
+                        ffmpegcmd = str(getSettings()["ffmpeg command"])
                         ffmpegcmd = ffmpegcmd.replace("<url>", link)
                         ffmpegcmd = ffmpegcmd.replace(
                             "<timeout>",
@@ -1192,7 +1180,7 @@ def channel(portalId, channelId):
                                                         )
                                                         == "ffmpeg"
                                                     ):
-                                                        ffmpegcmd = ffmpeg_path + " " + str(
+                                                        ffmpegcmd = str(
                                                             getSettings()[
                                                                 "ffmpeg command"
                                                             ]
@@ -1429,6 +1417,6 @@ if __name__ == "__main__":
 
     # Start the server
     if "TERM_PROGRAM" in os.environ.keys() and os.environ["TERM_PROGRAM"] == "vscode":
-        app.run(host="0.0.0.0", port=8001, debug=True)
+        app.run(host="0.0.0.0", port=13681, debug=True)
     else:
-        waitress.serve(app, port=8001, _quiet=True, threads=24)
+        waitress.serve(app, port=13681, _quiet=True, threads=24)

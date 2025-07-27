@@ -1,7 +1,55 @@
 {% extends "base.html" %}
+
+{% block head %}
+<style>
+    .table-warning {
+        background-color: #fff3cd !important;
+        border-color: #ffeaa7 !important;
+    }
+    .table-dark .table-warning {
+        background-color: #664d03 !important;
+        color: #fff !important;
+    }
+    .duplicate-badge {
+        background-color: #dc3545;
+        color: white;
+        font-size: 0.7em;
+        padding: 2px 6px;
+        border-radius: 10px;
+        margin-left: 5px;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 
 <div class="container-fluid table-responsive p-lg-5">
+    <!-- Filter dropdowns above the table -->
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <select class="form-select" id="portalFilter">
+                <option value="">All Portals</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" id="genreFilter">
+                <option value="">All Genres</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" id="duplicateFilter">
+                <option value="">All Channels</option>
+                <option value="duplicates">Enabled Duplicates Only</option>
+                <option value="unique">Unique Only</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <button class="btn btn-warning" onclick="deactivateDuplicates()" title="Deactivate enabled duplicate channels (keeps first enabled occurrence)">
+                <i class="fa fa-trash"></i> Deactivate Enabled Duplicates
+            </button>
+        </div>
+    </div>
+
     <table id="table" class="table table-striped table-dark nowrap" width="100%">
         <thead>
             <tr>
@@ -13,7 +61,7 @@
                 <th>Play</th>
                 <th>Name</th>
                 <th>Genre</th>
-                <th>Channel</th>
+                <th>Number</th>
                 <th>EPG ID</th>
                 <th>Fallback For</th>
                 <th>Portal</th>
@@ -34,6 +82,11 @@
 
     <form action="/editor/reset" method="post" id="reset" hidden>
     </form>
+
+    <!-- Channel Names Datalist for Fallback Suggestions -->
+    <datalist id="channelNamesList">
+        <!-- Options will be populated dynamically -->
+    </datalist>
 
     <!-- Video Modal -->
     <div class="modal fade" id="videoModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
@@ -61,6 +114,9 @@
     var genreEdits = [];
     var epgEdits = [];
     var fallbackEdits = [];
+    var dataTable;
+    var allChannelNamesCount = {}; // Track all channel name frequencies for autocomplete
+    var enabledChannelNamesCount = {}; // Track enabled channel name frequencies for duplicate detection
 
     function editAll(ele) {
         var checkboxes = document.getElementsByClassName('checkbox');
@@ -148,6 +204,57 @@
         player.src = "";
     })
 
+    // Populate filter dropdowns and channel names datalist
+    function populateFilters(data) {
+        // Calculate channel name frequencies for autocomplete and duplicate detection
+        allChannelNamesCount = {};
+        enabledChannelNamesCount = {};
+        
+        data.forEach(ch => {
+            const channelName = ch.customChannelName || ch.channelName;
+            // Count all channels for autocomplete
+            allChannelNamesCount[channelName] = (allChannelNamesCount[channelName] || 0) + 1;
+            
+            // Track enabled channels separately for duplicate detection
+            if (ch.enabled) {
+                enabledChannelNamesCount[channelName] = (enabledChannelNamesCount[channelName] || 0) + 1;
+            }
+        });
+
+        // Populate portal filter
+        const portals = [...new Set(data.map(ch => ch.portalName))].sort();
+        const portalSelect = document.getElementById('portalFilter');
+        portalSelect.innerHTML = '<option value="">All Portals</option>';
+        portals.forEach(portal => {
+            const option = document.createElement('option');
+            option.value = portal;
+            option.textContent = portal;
+            portalSelect.appendChild(option);
+        });
+
+        // Populate genre filter
+        const genres = [...new Set(data.map(ch => ch.genre))].filter(g => g && g !== 'None').sort();
+        const genreSelect = document.getElementById('genreFilter');
+        genreSelect.innerHTML = '<option value="">All Genres</option>';
+        genres.forEach(genre => {
+            const option = document.createElement('option');
+            option.value = genre;
+            option.textContent = genre;
+            genreSelect.appendChild(option);
+        });
+
+        // Populate channel names datalist for fallback suggestions
+        const channelNames = Object.keys(allChannelNamesCount).sort();
+        
+        const channelDatalist = document.getElementById('channelNamesList');
+        channelDatalist.innerHTML = '';
+        channelNames.forEach(channelName => {
+            const option = document.createElement('option');
+            option.value = channelName;
+            channelDatalist.appendChild(option);
+        });
+    }
+
     /* Create an array with the values of all the checkboxes in a column */
     $.fn.dataTable.ext.order['dom-checkbox'] = function (settings, col) {
         return this.api().column(col, { order: 'index' }).nodes().map(function (td, i) {
@@ -172,13 +279,12 @@
     };
 
     $(document).ready(function () {
-        $('#table').DataTable({
+        dataTable = $('#table').DataTable({
             dom: "<'row m-1'<'col-auto'B><'col-auto ms-auto'f><'col-auto'l>>" +
                 "<'row'<'col-12'tr>>" +
                 "<'row mb-1 mb-lg-0'<'col-auto text-light'i><'col-auto ms-auto'p>>",
             orderFixed: [0, 'des'],
-            //order: [[0, 'des'], [2, 'asc']],
-			order: [[4, 'asc']],
+            order: [[0, 'des'], [2, 'asc']],
             pageLength: 25,
             lengthMenu: [[25, 50, 100, 250, 500, 1000, -1], [25, 50, 100, 250, 500, 1000, "All"]],
             columnDefs: [
@@ -222,7 +328,11 @@
             ajax: {
                 "url": "{{ url_for('editor_data') }}",
                 "dataType": "json",
-                "dataSrc": "data",
+                "dataSrc": function(data) {
+                    // Populate filters when data is loaded
+                    populateFilters(data.data);
+                    return data.data;
+                },
                 "contentType": "application/json"
             },
             columns: [
@@ -246,34 +356,29 @@
                 },
                 {
                     data: "link",
-					render: function (data, type, row, meta) {
-						// Get the current host (e.g., 'localhost:8001' or your live domain)
-						var currentHost = window.location.host;
-
-						// Create a regular expression to remove the protocol (http:// or https://) and the host
-						var strippedLink = row.link.replace(/^https?:\/\/[^\/]+/, "");
-
-						// Construct the new link by adding the current host
-						var newLink = "http://" + currentHost + strippedLink;
-
-						// Return the button HTML with the dynamically constructed URL
-						return '<button \
-							class="btn btn-success btn-block" \
-							title="Play" \
-							data-bs-toggle="modal" \
-							data-bs-target="#videoModal" \
-							onclick="selectChannel(this)" \
-							data-channelName="' + row.channelName + '" \
-							data-customChannelName="' + row.customChannelName + '" \
-							data-link="' + newLink + '">\
-							<i class="fa fa-play"></i>\
-						</button>';
+                    render: function (data, type, row, meta) {
+                        return '<button \
+                            class="btn btn-success btn-block" \
+                            title="Play" \
+                            data-bs-toggle="modal" \
+                            data-bs-target="#videoModal" \
+                            onclick="selectChannel(this)" \
+                            data-channelName="' + row.channelName + '" \
+                            data-customChannelName="' + row.customChannelName + '" \
+                            data-link="' + row.link + '">\
+                            <i class="fa fa-play"></i>\
+                        </button>'
                     }
                 },
                 {
                     data: "channelName",
                     render: function (data, type, row, meta) {
-                        return '<input \
+                        var channelName = row.customChannelName || row.channelName;
+                        var enabledDuplicateCount = enabledChannelNamesCount[channelName] || 0;
+                        var duplicateBadge = enabledDuplicateCount > 1 ? '<span class="duplicate-badge">' + enabledDuplicateCount + 'x enabled</span>' : '';
+                        
+                        return '<div>' +
+                               '<input \
                                 type="text" \
                                 class="form-control" \
                                 style="min-width: 200px;" \
@@ -282,8 +387,9 @@
                                 data-channelId="' + row.channelId + '" \
                                 placeholder="' + row.channelName + '" \
                                 title="' + row.channelName + '" \
-                                value="' + row.customChannelName +
-                            '">'
+                                value="' + row.customChannelName + '">' +
+                               duplicateBadge +
+                               '</div>'
                     },
                 },
                 {
@@ -298,15 +404,14 @@
                                 data-channelId="' + row.channelId + '" \
                                 placeholder="' + row.genre + '" \
                                 title="' + row.genre + '" \
-                                value="' + row.customGenre +
-                            '">'
+                                value="' + row.customGenre + '">'
                     },
                 },
                 {
                     data: "channelNumber",
                     render: function (data, type, row, meta) {
                         return '<input \
-                                type="test" \
+                                type="text" \
                                 class="form-control" \
                                 style="min-width: 100px;" \
                                 onchange="editCustomNumber(this)" \
@@ -314,8 +419,7 @@
                                 data-channelId="' + row.channelId + '" \
                                 placeholder="' + row.channelNumber + '" \
                                 title="' + row.channelNumber + '" \
-                                value="' + row.customChannelNumber +
-                            '">'
+                                value="' + row.customChannelNumber + '">'
                     },
                 },
                 {
@@ -328,10 +432,9 @@
                                 onchange="editCustomEpgId(this)" \
                                 data-portal="' + row.portal + '" \
                                 data-channelId="' + row.channelId + '" \
-                                placeholder="" \
-                                title="' + row.channelName + '" \
-                                value="' + row.customEpgId +
-                            '">'
+                                placeholder="' + row.portal + row.channelId + '" \
+                                title="' + row.portal + row.channelId + '" \
+                                value="' + row.customEpgId + '">'
                     },
                 },
                 {
@@ -341,17 +444,159 @@
                                 type="text" \
                                 class="form-control" \
                                 style="min-width: 200px;" \
+                                list="channelNamesList" \
+                                placeholder="Enter channel name..." \
+                                title="Type to search or click to see all channel names" \
                                 onchange="editFallback(this)" \
                                 data-portal="' + row.portal + '" \
                                 data-channelId="' + row.channelId + '" \
-                                value="' + row.fallbackChannel +
-                            '">'
+                                value="' + row.fallbackChannel + '">'
                     }
                 },
                 { data: "portalName" },
             ],
         });
+
+        // Custom filtering using DataTables search API
+        $.fn.dataTable.ext.search.push(
+            function(settings, data, dataIndex) {
+                if (settings.nTable.id !== 'table') {
+                    return true;
+                }
+                
+                var portalFilter = $('#portalFilter').val();
+                var genreFilter = $('#genreFilter').val();
+                var duplicateFilter = $('#duplicateFilter').val();
+                
+                // Get the actual row data
+                var rowData = dataTable.row(dataIndex).data();
+                
+                // Check portal filter
+                if (portalFilter && rowData.portalName !== portalFilter) {
+                    return false;
+                }
+                
+                // Check genre filter
+                if (genreFilter && rowData.genre !== genreFilter) {
+                    return false;
+                }
+                
+                // Check duplicate filter (only consider enabled duplicates)
+                if (duplicateFilter) {
+                    var channelName = rowData.customChannelName || rowData.channelName;
+                    var isDuplicate = enabledChannelNamesCount[channelName] > 1;
+                    
+                    if (duplicateFilter === 'duplicates' && !isDuplicate) {
+                        return false;
+                    }
+                    if (duplicateFilter === 'unique' && isDuplicate) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            }
+        );
+
+        // Custom filtering for dropdowns
+        $('#portalFilter').on('change', function() {
+            dataTable.draw();
+        });
+
+        $('#genreFilter').on('change', function() {
+            dataTable.draw();
+        });
+
+        $('#duplicateFilter').on('change', function() {
+            dataTable.draw();
+            highlightDuplicates();
+        });
+
+        // Initial highlight of duplicates after table is loaded
+        dataTable.on('draw', function() {
+            highlightDuplicates();
+        });
     });
 
+    // Function to highlight duplicate rows (only enabled duplicates)
+    function highlightDuplicates() {
+        setTimeout(function() {
+            $('#table tbody tr').each(function() {
+                if ($(this).is(':visible')) {
+                    var rowData = dataTable.row(this).data();
+                    if (rowData) {
+                        var channelName = rowData.customChannelName || rowData.channelName;
+                        var isDuplicate = enabledChannelNamesCount[channelName] > 1;
+                        
+                        if (isDuplicate && rowData.enabled) {
+                            $(this).addClass('table-warning');
+                            $(this).attr('title', 'Enabled duplicate: ' + channelName + ' (' + enabledChannelNamesCount[channelName] + ' enabled instances)');
+                        } else {
+                            $(this).removeClass('table-warning');
+                            $(this).removeAttr('title');
+                        }
+                    }
+                }
+            });
+        }, 100);
+    }
+
+    // Function to deactivate all enabled duplicate channels (keeps first enabled occurrence)
+    function deactivateDuplicates() {
+        if (!confirm('This will deactivate duplicate enabled channels, keeping only the first enabled occurrence of each. Continue?')) {
+            return;
+        }
+
+        var seenEnabledChannels = {};
+        var duplicatesDeactivated = 0;
+
+        // Go through all channels and track first enabled occurrence
+        dataTable.rows().every(function() {
+            var rowData = this.data();
+            var channelName = rowData.customChannelName || rowData.channelName;
+            
+            // Only process if this channel has enabled duplicates
+            if (enabledChannelNamesCount[channelName] > 1 && rowData.enabled) {
+                if (seenEnabledChannels[channelName]) {
+                    // This is a duplicate enabled channel, deactivate it
+                    rowData.enabled = false;
+                    duplicatesDeactivated++;
+                    
+                    // Update the checkbox in the table
+                    var checkbox = $(this.node()).find('input[type="checkbox"]').first();
+                    checkbox.prop('checked', false);
+                    
+                    // Add to edits
+                    enabledEdits.push({
+                        portal: rowData.portal,
+                        'channel id': rowData.channelId,
+                        enabled: false
+                    });
+                } else {
+                    // First enabled occurrence, mark as seen
+                    seenEnabledChannels[channelName] = true;
+                }
+            }
+        });
+
+        if (duplicatesDeactivated > 0) {
+            hasChanges = true;
+            document.getElementById('saveBtn').disabled = false;
+            document.getElementById('saveBtn2').disabled = false;
+            
+            // Refresh the duplicate detection after changes
+            var tableData = [];
+            dataTable.rows().every(function() {
+                tableData.push(this.data());
+            });
+            populateFilters(tableData);
+            
+            alert(duplicatesDeactivated + ' duplicate enabled channels have been deactivated. Don\'t forget to save your changes!');
+        } else {
+            alert('No enabled duplicate channels found to deactivate.');
+        }
+    }
+
 </script>
-{% endblock %}
+
+{% endblock %} 

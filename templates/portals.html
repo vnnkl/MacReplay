@@ -1,254 +1,229 @@
 {% extends "base.html" %}
+
+{% block title %}Portals - MacReplay{% endblock %}
+
 {% block content %}
-
-<div class="container-fluid p-lg-5">
-
-    <div>
-        <button class="btn btn-success btn-block" title="Add Portal" data-bs-toggle="modal"
-            data-bs-target="#modalAdd"><i class="fa fa-plus"></i> Add Portal</button>
-    </div>
-
-    <br>
-
-    <div class="row row-cols-auto" id="streamOut">
-
-
-        {% if portals is not none %}
-        {% for portal in portals %}
-
-        <div class="col">
-
-            <div class="card text-dark bg-light mb-3">
-                <div class="card-header btn text-start stretched-link" data-id="{{ portal }}"
-                    data-enabled="{{ portals[portal].enabled }}" data-name="{{ portals[portal].name }}"
-                    data-url="{{ portals[portal].url }}" data-proxy="{{ portals[portal].proxy }}"
-                    data-macs="{{ portals[portal].macs|join(',') }}"
-                    data-streamsPerMac="{{ portals[portal]['streams per mac'] }}" data-bs-toggle="modal"
-                    data-epgOffset="{{ portals[portal]['epg offset'] }}" data-bs-toggle="modal"
-                    data-bs-target="#modalEdit">
-                    <i class="me-2 fa fa-server"{{ "hidden" if portals[portal].enabled =='false' }}></i>
-                    <i class="me-2 fa fa-ban"{{ "hidden" if portals[portal].enabled =='true' }}></i>
-                    {{ portals[portal].name }}
-                </div>
-                <div class="card-body">
-                    <table class="table table-sm mt-2">
-                        {% for key, value in portals[portal].macs.items() %}
-                        <tr>
-                            <td><span>{{key.upper()}}</span></td>
-                            <td><span>:</span></td>
-                            <td><span name="expiryString">{{value}}</span></td>
-
-                        </tr>
-                        {% endfor %}
-                    </table>
-                </div>
-            </div>
-
-        </div>
-
-        {% endfor %}
-        {% endif %}
-
-    </div>
-
-</div>
-
-
-<!-- Add Modal -->
-<div class="modal fade text-dark" id="modalAdd" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Add Portal</h5>
-            </div>
-            <div class="modal-body">
-
-				<form action="/portal/add" method="post">
-
-					<h6>Name:</h6>
-					<input type="text" name="name" class="form-control flex-fill" title="Name" required>
-					<span class="text-muted">Give this portal a name.</span>
-
-					<br><br>
-
-					<h6>URL:</h6>
-					<input type="text" name="url" class="form-control flex-fill" title="URL" required>
-					<span class="text-muted">It's best to enter the full address ending in .php if you know it.<br>If not, MacReplay will attempt to figure it out for you.</span>
-
-					<br><br>
-
-					<h6>Proxy:</h6>
-					<input type="text" name="proxy" class="form-control flex-fill" title="Proxy">
-					<span class="text-muted">MacReplay supports HTTP proxies only.</span>
-
-					<br><br>
-
-					<h6>MACs:</h6>
-					<input type="text" name="macs" class="form-control flex-fill" title="MACs" required>
-					<span class="text-muted">Enter a comma-separated list of MAC addresses.</span>
-
-					<br><br>
-
-					<div class="row">
-						<div class="col">
-							<h6>Streams Per MAC:</h6>
-							<input type="number" name="streams per mac" class="form-control" title="Streams Per MAC" min="0" value="1" required>
-							<span class="text-muted">How many streams does each MAC allow. 0 = unlimited.</span>
-						</div>
-						<div class="col">
-							<h6>EPG Offset:</h6>
-							<input type="number" name="epg offset" class="form-control" title="EPG Offset" min="0" value="0" required>
-							<span class="text-muted">Specify the EPG offset in hours.</span>
-						</div>
-					</div>
-
-					<br>
-
-					<div class="modal-footer">
-						<button class="btn btn-secondary" title="Cancel" data-bs-dismiss="modal">Cancel</button>
-						<button class="btn btn-success btn-block" title="Add">Add</button>
-					</div>
-
-				</form>
-
-            </div>
-        </div>
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-satellite-dish"></i> Portal Management</h2>
+        <p class="text-muted">Manage your IPTV portals and MAC addresses</p>
     </div>
 </div>
 
-<!-- Edit Modal -->
-<div class="modal fade text-dark" id="modalEdit" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Edit Portal</h5>
-                <div class="form-check form-switch ms-auto">
-                    <input type="checkbox" form="update" class="checkbox form-check-input" name="enabled" id="editEnabled"
-                        value="true">
-                </div>
+<div class="row mb-4">
+    <div class="col-12">
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addPortalModal">
+            <i class="fas fa-plus"></i> Add Portal
+        </button>
+    </div>
+</div>
+
+{% if portals %}
+<div class="row">
+    {% for portal_id, portal in portals.items() %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">{{ portal.name or 'Unnamed Portal' }}</h5>
+                <span class="badge bg-{{ 'success' if portal.enabled == 'true' else 'secondary' }}">
+                    {{ 'Enabled' if portal.enabled == 'true' else 'Disabled' }}
+                </span>
             </div>
-            <div class="modal-body">
+            <div class="card-body">
+                <p class="card-text">
+                    <strong>URL:</strong><br>
+                    <small class="text-muted">{{ portal.url[:50] }}{% if portal.url|length > 50 %}...{% endif %}</small>
+                </p>
+                <p class="card-text">
+                    <strong>MAC Addresses:</strong> {{ portal.macs|length }}
+                </p>
+                <p class="card-text">
+                    <strong>Streams per MAC:</strong> {{ portal['streams per mac'] }}
+                </p>
+                <p class="card-text">
+                    <strong>EPG Offset:</strong> {{ portal['epg offset'] }} hours
+                </p>
+            </div>
+            <div class="card-footer">
+                <button class="btn btn-sm btn-outline-primary" onclick="editPortal('{{ portal_id }}')">
+                    <i class="fas fa-edit"></i> Edit
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deletePortal('{{ portal_id }}', '{{ portal.name }}')">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="fas fa-info-circle"></i> No portals configured. Add your first portal to get started.
+</div>
+{% endif %}
 
-                <form id="update" action="/portal/update" method="post">
-
-                    <input name="id" id="editId" hidden>
-                    <input type="checkbox" name="retest" id="retest" value="true" hidden>
-
-                    <h6>Name:</h6>
-                    <input type="text" name="name" id="editName" class="form-control flex-fill" title="Name" required>
-                    <span class="text-muted">Give this portal a name.</span>
-
-                    <br><br>
-
-                    <h6>URL:</h6>
-                    <input type="text" name="url" id="editUrl" class="form-control flex-fill" title="URL" required>
-                    <span class="text-muted">Its best to enter the full address ending in .php if you know
-                        it.<br>If
-                        not MacReplay will attempt to figure it out for you.</span>
-
-                    <br><br>
-
-                    <h6>Proxy:</h6>
-                    <input type="text" name="proxy" id="editProxy" class="form-control flex-fill" title="Proxy">
-                    <span class="text-muted">MacReplay supports HTTP proxies only.</span>
-
-                    <br><br>
-
-                    <h6>MACs:</h6>
-                    <input type="text" name="macs" id="editMacs" class="form-control flex-fill" title="MACs" required>
-                    <span class="text-muted">Enter a comma seperated list of MAC adresses.</span>
-
-                    <br><br>
-
-					<div class="row">
-						<div class="col">
-							<h6>Streams Per MAC:</h6>
-							<input type="number" name="streams per mac" id="editStreamsPerMac" class="form-control flex-fill"
-                        title="Streams Per MAC" min="0" required>
-							<span class="text-muted">How many streams does each MAC allow. 0 = unlimited.</span>
-						</div>
-						<div class="col">
-							<h6>EPG Offset:</h6>
-							<input type="number" name="epg offset" id="editepgOffset" class="form-control flex-fill"
-						title="EPG Offset" required>
-							<span class="text-muted">Offset the program guide in hours.</span>
-						</div>
-					</div>
-
-
-
-
-                    <br><br>
-
-                    <div class="modal-footer">
-                        <button class="btn btn-danger me-auto" title="Delete" form="delete"
-                            id="deleteName">Delete</button>
-                        <button class="btn btn-secondary" title="Cancel" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-success" title="Retest" onclick="retestSave()">Retest</button>
-                        <button class="btn btn-success" title="Save">Save</button>
+<!-- Add Portal Modal -->
+<div class="modal fade" id="addPortalModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="/portal/add">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New Portal</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Portal Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
                     </div>
-
-                </form>
-
-                <form id="delete" action="/portal/remove" method="post" onsubmit="return confirm('Confirm Delete');"
-                    hidden>
-                    <input type="text" name="deleteId" id="deleteId" value="">
-                </form>
-
-            </div>
+                    <div class="mb-3">
+                        <label for="url" class="form-label">Portal URL</label>
+                        <input type="url" class="form-control" id="url" name="url" placeholder="http://portal.example.com" required>
+                        <div class="form-text">Enter the portal domain or full URL</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="macs" class="form-label">MAC Addresses</label>
+                        <textarea class="form-control" id="macs" name="macs" rows="3" placeholder="00:1A:79:XX:XX:XX,00:1A:79:YY:YY:YY" required></textarea>
+                        <div class="form-text">Enter MAC addresses separated by commas</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="streams_per_mac" class="form-label">Streams per MAC</label>
+                            <input type="number" class="form-control" id="streams_per_mac" name="streams per mac" value="1" min="0" max="10">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="epg_offset" class="form-label">EPG Offset (hours)</label>
+                            <input type="number" class="form-control" id="epg_offset" name="epg offset" value="0" min="-12" max="12">
+                        </div>
+                    </div>
+                    <div class="mb-3 mt-3">
+                        <label for="proxy" class="form-label">Proxy (Optional)</label>
+                        <input type="text" class="form-control" id="proxy" name="proxy" placeholder="http://proxy:port">
+                        <div class="form-text">Leave empty if no proxy needed</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Portal</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
 
-<script>
+<!-- Edit Portal Modal -->
+<div class="modal fade" id="editPortalModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="/portal/update" id="editPortalForm">
+                <input type="hidden" id="edit_portal_id" name="id">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Portal</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_enabled" name="enabled" value="true">
+                            <label class="form-check-label" for="edit_enabled">
+                                Portal Enabled
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_name" class="form-label">Portal Name</label>
+                        <input type="text" class="form-control" id="edit_name" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_url" class="form-label">Portal URL</label>
+                        <input type="url" class="form-control" id="edit_url" name="url" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_macs" class="form-label">MAC Addresses</label>
+                        <textarea class="form-control" id="edit_macs" name="macs" rows="3" required></textarea>
+                        <div class="form-text">Enter MAC addresses separated by commas</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="edit_streams_per_mac" class="form-label">Streams per MAC</label>
+                            <input type="number" class="form-control" id="edit_streams_per_mac" name="streams per mac" min="0" max="10">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_epg_offset" class="form-label">EPG Offset (hours)</label>
+                            <input type="number" class="form-control" id="edit_epg_offset" name="epg offset" min="-12" max="12">
+                        </div>
+                    </div>
+                    <div class="mb-3 mt-3">
+                        <label for="edit_proxy" class="form-label">Proxy (Optional)</label>
+                        <input type="text" class="form-control" id="edit_proxy" name="proxy">
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="retest" name="retest" value="true">
+                            <label class="form-check-label" for="retest">
+                                Retest all MAC addresses
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Portal</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
-    var now = Date.now();
-    var expiries = document.getElementsByName("expiryString");
-    for (i in expiries) {
-        var expires = Date.parse(expiries[i].innerText);
-        var diff = expires - now;
-        var daysAway = diff / (1000 * 3600 * 24);
-        if (now > expires) {
-            expiries[i].parentElement.parentElement.classList.add("table-danger");
-        } else if (daysAway < 30) {
-            expiries[i].parentElement.parentElement.classList.add("table-warning");
-        }
-
-    }
-
-    var editModal = document.getElementById('modalEdit');
-    editModal.addEventListener('show.bs.modal', function (event) {
-        var button = event.relatedTarget;
-        var id = button.getAttribute('data-id');
-        var enabled = button.getAttribute('data-enabled');
-        var name = button.getAttribute('data-name');
-        var url = button.getAttribute('data-url');
-        var proxy = button.getAttribute('data-proxy');
-        var macs = button.getAttribute('data-macs');
-        var streamsPerMac = button.getAttribute('data-streamsPerMac');
-        var epgOffset = button.getAttribute('data-EpgOffset');
-        document.getElementById('editId').value = id;
-        if (enabled == "true") {
-            document.getElementById('editEnabled').checked = true;
-        } else {
-            document.getElementById('editEnabled').checked = false;
-        }
-        document.getElementById('editName').value = name;
-        document.getElementById('editUrl').value = url;
-        document.getElementById('editProxy').value = proxy;
-        document.getElementById('editMacs').value = macs;
-        document.getElementById('editStreamsPerMac').value = streamsPerMac;
-        document.getElementById('editepgOffset').value = epgOffset;
-        document.getElementById('deleteId').value = id;
-        document.getElementById('deleteName').value = name;
-        document.getElementById('retest').checked = false;
-    })
-
-    function retestSave() {
-        document.getElementById('retest').checked = true;
-        document.getElementById("update").submit();
-    }
-
-</script>
-
+<!-- Delete Portal Modal -->
+<div class="modal fade" id="deletePortalModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="/portal/remove">
+                <input type="hidden" id="delete_portal_id" name="deleteId">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Delete</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete the portal "<span id="delete_portal_name"></span>"?</p>
+                    <p class="text-danger"><strong>This action cannot be undone.</strong></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Delete Portal</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
+
+{% block scripts %}
+<script>
+const portalsData = {{ portals | tojsonfilter }};
+
+function editPortal(portalId) {
+    const portal = portalsData[portalId];
+    if (!portal) return;
+    
+    document.getElementById('edit_portal_id').value = portalId;
+    document.getElementById('edit_enabled').checked = portal.enabled === 'true';
+    document.getElementById('edit_name').value = portal.name;
+    document.getElementById('edit_url').value = portal.url;
+    document.getElementById('edit_macs').value = Object.keys(portal.macs).join(',');
+    document.getElementById('edit_streams_per_mac').value = portal['streams per mac'];
+    document.getElementById('edit_epg_offset').value = portal['epg offset'];
+    document.getElementById('edit_proxy').value = portal.proxy || '';
+    
+    new bootstrap.Modal(document.getElementById('editPortalModal')).show();
+}
+
+function deletePortal(portalId, portalName) {
+    document.getElementById('delete_portal_id').value = portalId;
+    document.getElementById('delete_portal_name').textContent = portalName;
+    
+    new bootstrap.Modal(document.getElementById('deletePortalModal')).show();
+}
+</script>
+{% endblock %} 

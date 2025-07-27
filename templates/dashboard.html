@@ -1,134 +1,246 @@
 {% extends "base.html" %}
+
+{% block title %}Dashboard - MacReplay{% endblock %}
+
 {% block content %}
-
-<div class="container-fluid text-light p-lg-5">
-    <h4>Streaming</h4>
-    <hr>
-    <div class="container-fluid">
-
-        <div class="row row-cols-auto" id="streamOut">
-
-        </div>
-
-    </div>
-
-    <br>
-    <br>
-
-    <h4>Log</h4>
-    <hr>
-    <div class="p-sm-3">
-        <div class="row row-cols-auto mb-2">
-            <span class="col">Autoscroll:</span>
-            <div class="form-check form-switch col">
-                <input type="checkbox" class="checkbox form-check-input" id="autoscroll" checked>
-            </div>
-        </div>
-        <pre class="border p-3" style="height: 40pc; overflow-y: scroll;" id="logOut"></pre>
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-chart-line"></i> Dashboard</h2>
+        <p class="text-muted">Monitor active streams and system status</p>
     </div>
 </div>
 
-<script>
-    // Log
-    var logURL = "{{ url_for('log') }}";
-    var logOut = document.getElementById('logOut');
-    var autoscroll = document.getElementById('autoscroll');
-    setInterval(function updateLog() {
-        fetch(logURL)
-            .then(function (response) {
-                return response.text();
-            })
-            .then(function (text) {
-                logOut.textContent = text;
-                if (autoscroll.checked) {
-                    logOut.scrollTop = logOut.scrollHeight;
-                }
-            })
-        return updateLog;
-    }(), 2000);
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="fas fa-stream"></i> Active Streams</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshStreams()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div id="streamsContainer">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Loading stream data...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
-    // Streaming
-    var streamingURL = "{{ url_for('streaming') }}";
-    var streamOut = document.getElementById('streamOut');
-    setInterval(function updateStreaming() {
-
-        fetch(streamingURL)
-            .then(function (response) {
-                return response.json();
-            })
-            .then(function (json) {
-
-                var codeBlock = ''
-
-                for (var portal in json) {
-                    for (const stream of json[portal]) {
-                        var portal = stream["portal name"]
-                        var mac = stream["mac"].toUpperCase()
-                        var client = stream["client"]
-                        var channel = stream["channel name"]
-                        var start = stream["start time"] * 1000
-                        var now = Date.now()
-                        var timeDifference = now - start;
-                        var differenceDate = new Date(timeDifference);
-                        var diffHours = differenceDate.getUTCHours();
-                        var diffMinutes = differenceDate.getUTCMinutes();
-                        var diffSeconds = differenceDate.getUTCSeconds();
-                        var dur = String(diffHours).padStart(2, '0') + ':' + String(diffMinutes).padStart(2, '0') + ':' + String(diffSeconds).padStart(2, '0');
-
-                        // Storing HTML code block in a variable
-                        var codeBlock = codeBlock +
-                            '<div class="col">' +
-                            '<div class="card text-dark bg-light mb-3">' +
-                            '<div class="card-header"><i class="me-2 fa fa-user"></i>' + client + '</div>' +
-                            '<div class="card-body">' +
-                            '<table class="table table-sm">' +
-                            '<tr>' +
-                            '<td>' +
-                            '<i class="fa fa-play"></i>' +
-                            '</td>' +
-                            '<td>' +
-                            '<p class="card-text text-nowrap">' + channel + '</p>' +
-                            '</td>' +
-                            '</tr>' +
-                            '<tr>' +
-                            '<td>' +
-                            '<i class="fa fa-server"></i>' +
-                            '</td>' +
-                            '<td>' +
-                            '<p class="card-text text-nowrap">' + portal + '</p>' +
-                            '</td>' +
-                            '</tr>' +
-                            '<tr>' +
-                            '<td>' +
-                            '<i class="fa fa-lock"></i>' +
-                            '</td>' +
-                            '<td>' +
-                            '<p class="card-text text-nowrap">' + mac + '</p>' +
-                            '</td>' +
-                            '<tr>' +
-                            '<td>' +
-                            '<i class="fa fa-clock-o"></i>' +
-                            '</td>' +
-                            '<td>' +
-                            '<p class="card-text text-nowrap">' + dur + '</p>' +
-                            '</td>' +
-                            '</tr>' +
-                            '</table>' +
-                            '</div>' +
-                            '</div>' +
-                            '</div>';
-                    }
-
-                }
-
-                // Inserting the code block to wrapper element
-                document.getElementById("streamOut").innerHTML = codeBlock
-
-            })
-        return updateStreaming;
-    }(), 1000);
-
-
-</script>
-
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-download"></i> Quick Downloads</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="/playlist.m3u" target="_blank" class="btn btn-outline-primary">
+                        <i class="fas fa-list"></i> Download M3U Playlist
+                    </a>
+                    <a href="/xmltv" target="_blank" class="btn btn-outline-secondary">
+                        <i class="fas fa-tv"></i> Download XMLTV Guide
+                    </a>
+                </div>
+                
+                <hr>
+                
+                <h6>Plex Setup URLs:</h6>
+                <div class="mb-2">
+                    <label class="form-label small">XMLTV Guide URL:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control form-control-sm" id="xmltvUrl" readonly>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('xmltvUrl')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small">M3U Playlist URL:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control form-control-sm" id="playlistUrl" readonly>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('playlistUrl')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> System Information</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <td>Server Status:</td>
+                        <td><span class="badge bg-success">Running</span></td>
+                    </tr>
+                    <tr>
+                        <td>Server URL:</td>
+                        <td><code id="serverUrl"></code></td>
+                    </tr>
+                    <tr>
+                        <td>Version:</td>
+                        <td>MacReplay Docker</td>
+                    </tr>
+                    <tr>
+                        <td>Last Updated:</td>
+                        <td id="lastUpdated">Loading...</td>
+                    </tr>
+                </table>
+                
+                <div class="mt-3">
+                    <button class="btn btn-sm btn-outline-primary" onclick="refreshLineup()">
+                        <i class="fas fa-sync"></i> Refresh Lineup
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="updatePlaylist()">
+                        <i class="fas fa-list"></i> Update Playlist
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
+
+{% block scripts %}
+<script>
+let streamsRefreshInterval;
+
+function refreshStreams() {
+    fetch('/streaming')
+        .then(response => response.json())
+        .then(data => {
+            displayStreams(data);
+        })
+        .catch(error => {
+            console.error('Error fetching streams:', error);
+            document.getElementById('streamsContainer').innerHTML = 
+                '<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> Error loading stream data</div>';
+        });
+}
+
+function displayStreams(streams) {
+    const container = document.getElementById('streamsContainer');
+    
+    if (!streams || Object.keys(streams).length === 0) {
+        container.innerHTML = '<div class="alert alert-info"><i class="fas fa-info-circle"></i> No active streams</div>';
+        return;
+    }
+    
+    let html = '<div class="table-responsive"><table class="table table-striped"><thead><tr><th>Portal</th><th>Channel</th><th>MAC</th><th>Client IP</th><th>Start Time</th><th>Duration</th></tr></thead><tbody>';
+    
+    Object.keys(streams).forEach(portalId => {
+        streams[portalId].forEach(stream => {
+            const startTime = new Date(stream['start time'] * 1000);
+            const duration = Math.floor((Date.now() - startTime.getTime()) / 1000);
+            const durationStr = formatDuration(duration);
+            
+            html += `
+                <tr>
+                    <td>${stream['portal name']}</td>
+                    <td>${stream['channel name']}</td>
+                    <td><code>${stream.mac}</code></td>
+                    <td>${stream.client}</td>
+                    <td>${startTime.toLocaleString()}</td>
+                    <td>${durationStr}</td>
+                </tr>
+            `;
+        });
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function formatDuration(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${secs}s`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    } else {
+        return `${secs}s`;
+    }
+}
+
+function refreshLineup() {
+    fetch('/refresh_lineup', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            alert('Lineup refreshed successfully!');
+        })
+        .catch(error => {
+            console.error('Error refreshing lineup:', error);
+            alert('Error refreshing lineup');
+        });
+}
+
+function updatePlaylist() {
+    fetch('/update_playlistm3u', { method: 'POST' })
+        .then(response => response.text())
+        .then(data => {
+            alert('Playlist updated successfully!');
+        })
+        .catch(error => {
+            console.error('Error updating playlist:', error);
+            alert('Error updating playlist');
+        });
+}
+
+function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    element.select();
+    element.setSelectionRange(0, 99999);
+    document.execCommand('copy');
+    
+    // Visual feedback
+    const button = element.nextElementSibling;
+    const originalHtml = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-check"></i>';
+    button.classList.add('btn-success');
+    button.classList.remove('btn-outline-secondary');
+    
+    setTimeout(() => {
+        button.innerHTML = originalHtml;
+        button.classList.remove('btn-success');
+        button.classList.add('btn-outline-secondary');
+    }, 2000);
+}
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', function() {
+    const baseUrl = window.location.origin;
+    document.getElementById('serverUrl').textContent = baseUrl;
+    document.getElementById('xmltvUrl').value = `${baseUrl}/xmltv`;
+    document.getElementById('playlistUrl').value = `${baseUrl}/playlist.m3u`;
+    document.getElementById('lastUpdated').textContent = new Date().toLocaleString();
+    
+    // Initial load
+    refreshStreams();
+    
+    // Auto-refresh streams every 30 seconds
+    streamsRefreshInterval = setInterval(refreshStreams, 30000);
+});
+
+// Cleanup interval on page unload
+window.addEventListener('beforeunload', function() {
+    if (streamsRefreshInterval) {
+        clearInterval(streamsRefreshInterval);
+    }
+});
+</script>
+{% endblock %} 

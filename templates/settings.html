@@ -1,204 +1,196 @@
 {% extends "base.html" %}
+
+{% block title %}Settings - MacReplay{% endblock %}
+
 {% block content %}
-
-<div class="container-fluid text-light p-lg-5">
-
-    <div>
-        <button form="save" class="btn btn-success btn-block" title="Save"><i class="fa fa-save"></i> Save</button>
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-cog"></i> Settings</h2>
+        <p class="text-muted">Configure MacReplay application settings</p>
     </div>
-    <br>
-
-    <form id="save" action="/settings/save" method="post"></form>
-
-    <input form="save" type="text" name="hdhr id" id="hdhr id" class="form-control" value="{{ settings['hdhr id'] }}" hidden>
-
-    <h4>Streaming</h4>
-    <hr>
-    <div class="p-sm-3">
-
-        <h6>Streaming Method:</h6>
-        <div class="col-md-2">
-            <select class="form-select" title="Streaming Method" form="save" id="stream method" name="stream method"
-                required>
-                <option {{ "selected" if settings['stream method']=="ffmpeg" }} value="ffmpeg">FFMpeg</option>
-                <option {{ "selected" if settings['stream method']=="redirect" }} value="redirect">Redirect</option>
-            </select>
-        </div>
-        <span class="text-muted">FFMpeg is required to keep track of accounts and ensure only x users per MAC.</span>
-
-        <br><br>
-
-        <h6>FFMpeg Command:</h6>
-        <div class="col-md-12">
-            <div class="input-group flex-nowrap">
-                <input form="save" type="text" name="ffmpeg command" id="ffmpeg command" class="form-control"
-                    value="{{ settings['ffmpeg command'] }}" required>
-                <button class="btn btn-danger btn-block" title="Reset"><i class="fa fa-undo"
-                        onclick="resetDefault(this)" data-input="ffmpeg command"
-                        data-default="{{ defaultSettings['ffmpeg command'] }}"></i></button>
-            </div>
-        </div>
-        <span class="text-muted">Edit with caution! Check FFmpeg documentation for help.<br>'&lt;proxy&gt;',
-            '&lt;url&gt;', and '&lt;timeout&gt;' are the available variables.</span>
-
-        <br><br>
-
-        <h6>FFMpeg Timeout:</h6>
-        <div class="col-md-2">
-            <div class="input-group flex-nowrap">
-                <input form="save" type="number" name="ffmpeg timeout" id="ffmpeg timeout" class="form-control"
-                    value="{{ settings['ffmpeg timeout'] }}" required>
-                <button class="btn btn-danger btn-block" title="Reset"><i class="fa fa-undo"
-                        onclick="resetDefault(this)" data-input="ffmpeg timeout" data-default="{{ defaultSettings['ffmpeg timeout'] }}"></i></button>
-            </div>
-        </div>
-        <span class="text-muted">Seconds to wait for a stream before giving up.</span>
-
-        <br><br>
-
-        <h6>Test Streams:</h6>
-        <div class="col-md-2">
-            <div class="form-check form-switch">
-                <input form="save" type="checkbox" class="checkbox form-check-input" name="test streams" value="true" {{ "checked" if settings['test streams']=='true' }}>
-            </div>
-        </div>
-        <span class="text-muted">This is required for the fallback system to work.</span>
-
-        <br><br>
-
-        <h6>Try All MAC's:</h6>
-        <div class="col-md-2">
-            <div class="form-check form-switch">
-                <input form="save" type="checkbox" class="checkbox form-check-input" name="try all macs" value="true" {{ "checked" if settings['try all macs']=='true' }}>
-            </div>
-        </div>
-        <span class="text-muted">Try all MAC's before looking for a fallback.</span>
-
-    </div>
-
-    <br>
-
-    <h4>Playlist</h4>
-    <hr>
-    <div class="p-sm-3">
-
-        <h6>Use channel genres:</h6>
-        <div class="form-check form-switch">
-            <input form="save" type="checkbox" class="checkbox form-check-input" name="use channel genres" value="true" {{ "checked" if settings['use channel genres']=='true' }}>
-        </div>
-
-        <br>
-
-        <h6>Use channel numbers:</h6>
-        <div class="form-check form-switch">
-            <input form="save" type="checkbox" class="checkbox form-check-input" name="use channel numbers" value="true" {{ "checked" if settings['use channel numbers']=='true' }}>
-        </div>
-
-        <br>
-
-        <h6>Sort by genre:</h6>
-        <div class="form-check form-switch">
-            <input form="save" type="checkbox" class="checkbox form-check-input" name="sort playlist by channel genre" value="true" {{ "checked" if settings['sort playlist by channel genre']=='true' }}>
-        </div>
-
-        <br>
-
-        <h6>Sort by number:</h6>
-        <div class="form-check form-switch">
-            <input form="save" type="checkbox" class="checkbox form-check-input" name="sort playlist by channel number" value="true" {{ "checked" if settings['sort playlist by channel number']=='true' }}>
-        </div>
-
-        <br>
-
-        <h6>Sort by name:</h6>
-        <div class="form-check form-switch">
-            <input form="save" type="checkbox" class="checkbox form-check-input" name="sort playlist by channel name" value="true" {{ "checked" if settings['sort playlist by channel name']=='true' }}>
-        </div>
-        <span class="text-muted">Sorting options stack and are applied: Genre > Number > Name.<br>Without any sorting
-            the channels are listed as the server lists them.</span>
-
-    </div>
-
-    <br>
-
-    <h4>Security</h4>
-    <hr>
-    <div class="p-sm-3">
-
-        <h6>Enable:</h6>
-        <div class="form-check form-switch">
-            <input form="save" type="checkbox" class="checkbox form-check-input" name="enable security" value="true" {{ "checked" if settings['enable security']=='true' }}>
-        </div>
-
-        <br>
-
-        <h6>Username:</h6>
-        <div class="col-md-4">
-            <input form="save" type="text" name="username" id="username" class="form-control"
-                value="{{ settings['username'] }}" title="Username" required>
-        </div>
-
-        <br>
-
-        <h6>Password:</h6>
-        <div class="col-md-4">
-            <input form="save" type="password" name="password" id="password" class="form-control"
-                value="{{ settings['password'] }}" title="Password" required>
-        </div>
-        <span class="text-muted">Recommended if MacReplay is exposed to the internet or on a public network.</span>
-
-    </div>
-
-    <br>
-
-    <h4>HDHomeRun</h4>
-    <hr>
-    <div class="p-sm-3">
-
-        <h6>Enable:</h6>
-        <div class="form-check form-switch">
-            <input form="save" type="checkbox" class="checkbox form-check-input" name="enable hdhr" value="true" {{ "checked" if settings['enable hdhr']=='true' }}>
-        </div>
-
-        <br>
-
-        <h6>Name:</h6>
-        <div class="col-md-4">
-            <div class="input-group flex-nowrap">
-                <input form="save" type="text" name="hdhr name" id="hdhr name" class="form-control"
-                    value="{{ settings['hdhr name'] }}" required>
-                <button class="btn btn-danger btn-block" title="Reset"><i class="fa fa-undo"
-                        onclick="resetDefault(this)" data-input="hdhr name" data-default="{{ defaultSettings['hdhr name'] }}"></i></button>
-            </div>
-        </div>
-        <span class="text-muted">Display name of the server in Plex DVR etc.</span>
-
-        <br>
-        <br>
-
-        <h6>Tuners:</h6>
-        <div class="col-md-2">
-            <div class="input-group flex-nowrap">
-                <input form="save" type="number" name="hdhr tuners" id="hdhr tuners" class="form-control"
-                    value="{{ settings['hdhr tuners'] }}" required>
-                <button class="btn btn-danger btn-block" title="Reset"><i class="fa fa-undo"
-                        onclick="resetDefault(this)" data-input="hdhr tuners" data-default="{{ defaultSettings['hdhr tuners'] }}"></i></button>
-            </div>
-        </div>
-        <span class="text-muted">Max concurrent streams in Plex DVR etc.</span>
-
-    </div>
-
-    <br>
-
 </div>
 
-<script>
-    function resetDefault(ele) {
-        var d = ele.getAttribute('data-default');
-        var i = ele.getAttribute('data-input');
-        document.getElementById(i).value = d;
-    }
-</script>
-
-{% endblock %}
+<form method="POST" action="/settings/save">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-video"></i> Streaming Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="stream_method" class="form-label">Stream Method</label>
+                        <select class="form-select" id="stream_method" name="stream method">
+                            <option value="ffmpeg" {{ 'selected' if settings['stream method'] == 'ffmpeg' }}>FFmpeg</option>
+                            <option value="redirect" {{ 'selected' if settings['stream method'] == 'redirect' }}>Direct Redirect</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="ffmpeg_command" class="form-label">FFmpeg Command</label>
+                        <textarea class="form-control" id="ffmpeg_command" name="ffmpeg command" rows="3">{{ settings['ffmpeg command'] }}</textarea>
+                        <div class="form-text">
+                            Use placeholders: &lt;url&gt;, &lt;proxy&gt;, &lt;timeout&gt;
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="ffmpeg_timeout" class="form-label">FFmpeg Timeout (seconds)</label>
+                        <input type="number" class="form-control" id="ffmpeg_timeout" name="ffmpeg timeout" 
+                               value="{{ settings['ffmpeg timeout'] }}" min="1" max="60">
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="test_streams" name="test streams" 
+                               value="true" {{ 'checked' if settings['test streams'] == 'true' }}>
+                        <label class="form-check-label" for="test_streams">
+                            Test streams before serving
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="try_all_macs" name="try all macs" 
+                               value="true" {{ 'checked' if settings['try all macs'] == 'true' }}>
+                        <label class="form-check-label" for="try_all_macs">
+                            Try all MAC addresses on failure
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-list"></i> Playlist Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="use_channel_genres" name="use channel genres" 
+                               value="true" {{ 'checked' if settings['use channel genres'] == 'true' }}>
+                        <label class="form-check-label" for="use_channel_genres">
+                            Include channel genres in playlist
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="use_channel_numbers" name="use channel numbers" 
+                               value="true" {{ 'checked' if settings['use channel numbers'] == 'true' }}>
+                        <label class="form-check-label" for="use_channel_numbers">
+                            Include channel numbers in playlist
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="sort_by_genre" name="sort playlist by channel genre" 
+                               value="true" {{ 'checked' if settings['sort playlist by channel genre'] == 'true' }}>
+                        <label class="form-check-label" for="sort_by_genre">
+                            Sort playlist by genre
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="sort_by_number" name="sort playlist by channel number" 
+                               value="true" {{ 'checked' if settings['sort playlist by channel number'] == 'true' }}>
+                        <label class="form-check-label" for="sort_by_number">
+                            Sort playlist by channel number
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="sort_by_name" name="sort playlist by channel name" 
+                               value="true" {{ 'checked' if settings['sort playlist by channel name'] == 'true' }}>
+                        <label class="form-check-label" for="sort_by_name">
+                            Sort playlist by channel name
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-shield-alt"></i> Security Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="enable_security" name="enable security" 
+                               value="true" {{ 'checked' if settings['enable security'] == 'true' }}>
+                        <label class="form-check-label" for="enable_security">
+                            Enable HTTP authentication
+                        </label>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" name="username" 
+                               value="{{ settings['username'] }}" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" 
+                               value="{{ settings['password'] }}" required>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-tv"></i> HDHR Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="enable_hdhr" name="enable hdhr" 
+                               value="true" {{ 'checked' if settings['enable hdhr'] == 'true' }}>
+                        <label class="form-check-label" for="enable_hdhr">
+                            Enable HD HomeRun emulation
+                        </label>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="hdhr_name" class="form-label">HDHR Device Name</label>
+                        <input type="text" class="form-control" id="hdhr_name" name="hdhr name" 
+                               value="{{ settings['hdhr name'] }}" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="hdhr_id" class="form-label">HDHR Device ID</label>
+                        <input type="text" class="form-control" id="hdhr_id" name="hdhr id" 
+                               value="{{ settings['hdhr id'] }}" readonly>
+                        <div class="form-text">Device ID is automatically generated</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="hdhr_tuners" class="form-label">Number of Tuners</label>
+                        <input type="number" class="form-control" id="hdhr_tuners" name="hdhr tuners" 
+                               value="{{ settings['hdhr tuners'] }}" min="1" max="20">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between">
+                <div>
+                    <a href="/log" target="_blank" class="btn btn-outline-secondary">
+                        <i class="fas fa-file-alt"></i> View Logs
+                    </a>
+                </div>
+                <div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %} 
