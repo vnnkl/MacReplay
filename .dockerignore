@@ -1,0 +1,40 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+build.bat
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local data directories (these will be mounted as volumes)
+data/
+logs/
+
+# Documentation
+README.md
+
+# Windows specific files
+*.exe
+*.ico
+replay.ico
+
+# FFmpeg Windows binaries (we'll use system ffmpeg in container)
+ffmpeg/ 

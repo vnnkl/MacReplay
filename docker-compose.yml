@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  macreplay:
+    build: .
+    container_name: macreplay
+    ports:
+      - "8001:8001"
+    volumes:
+      # Persist configuration and logs
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - HOST=0.0.0.0:8001
+      - CONFIG=/app/data/MacReplay.json
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Optional: if you want to use an external network
+# networks:
+#   default:
+#     external: true
+#     name: your-network-name 
