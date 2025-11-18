@@ -59,6 +59,7 @@ from datetime import datetime, timezone
 from functools import wraps
 import secrets
 import waitress
+import sqlite3
 
 app = Flask(__name__)
 app.secret_key = secrets.token_urlsafe(32)
@@ -85,6 +86,14 @@ else:
 os.makedirs(os.path.dirname(configFile), exist_ok=True)
 
 logger.info(f"Using config file: {configFile}")
+
+# Database path for channel caching
+if os.getenv("DB_PATH"):
+    dbPath = os.getenv("DB_PATH")
+else:
+    dbPath = os.path.join(basePath, "evilvir.us", "channels.db")
+
+logger.info(f"Using database file: {dbPath}")
 
 occupied = {}
 config = {}
@@ -216,6 +225,155 @@ def saveSettings(settings):
     with open(configFile, "w") as f:
         config["settings"] = settings
         json.dump(config, f, indent=4)
+
+
+def get_db_connection():
+    """Get a database connection."""
+    conn = sqlite3.connect(dbPath)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Initialize the database and create tables if they don't exist."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS channels (
+            portal TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            portal_name TEXT,
+            name TEXT,
+            number TEXT,
+            genre TEXT,
+            logo TEXT,
+            enabled INTEGER DEFAULT 0,
+            custom_name TEXT,
+            custom_number TEXT,
+            custom_genre TEXT,
+            custom_epg_id TEXT,
+            fallback_channel TEXT,
+            PRIMARY KEY (portal, channel_id)
+        )
+    ''')
+    
+    # Create indexes for better query performance
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_channels_enabled 
+        ON channels(enabled)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_channels_name 
+        ON channels(name)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_channels_portal 
+        ON channels(portal)
+    ''')
+    
+    conn.commit()
+    conn.close()
+    logger.info("Database initialized successfully")
+
+
+def refresh_channels_cache():
+    """Refresh the channels cache from STB portals."""
+    logger.info("Starting channel cache refresh...")
+    portals = getPortals()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    total_channels = 0
+    
+    for portal_id in portals:
+        portal = portals[portal_id]
+        if portal["enabled"] == "true":
+            portal_name = portal["name"]
+            url = portal["url"]
+            macs = list(portal["macs"].keys())
+            proxy = portal["proxy"]
+            
+            # Get existing settings from JSON config for migration
+            enabled_channels = portal.get("enabled channels", [])
+            custom_channel_names = portal.get("custom channel names", {})
+            custom_genres = portal.get("custom genres", {})
+            custom_channel_numbers = portal.get("custom channel numbers", {})
+            custom_epg_ids = portal.get("custom epg ids", {})
+            fallback_channels = portal.get("fallback channels", {})
+            
+            logger.info(f"Fetching channels for portal: {portal_name}")
+            
+            # Try each MAC until we get channel data
+            all_channels = None
+            genres = None
+            for mac in macs:
+                logger.info(f"Trying MAC: {mac}")
+                try:
+                    token = stb.getToken(url, mac, proxy)
+                    if token:
+                        stb.getProfile(url, mac, token, proxy)
+                        all_channels = stb.getAllChannels(url, mac, token, proxy)
+                        genres = stb.getGenreNames(url, mac, token, proxy)
+                        if all_channels and genres:
+                            break
+                except Exception as e:
+                    logger.error(f"Error fetching from MAC {mac}: {e}")
+                    all_channels = None
+                    genres = None
+            
+            if all_channels and genres:
+                logger.info(f"Processing {len(all_channels)} channels for {portal_name}")
+                
+                for channel in all_channels:
+                    channel_id = str(channel["id"])
+                    channel_name = str(channel["name"])
+                    channel_number = str(channel["number"])
+                    genre_id = str(channel.get("tv_genre_id", ""))
+                    genre = str(genres.get(genre_id, ""))
+                    logo = str(channel.get("logo", ""))
+                    
+                    # Check if enabled (from JSON config)
+                    enabled = 1 if channel_id in enabled_channels else 0
+                    
+                    # Get custom values (from JSON config)
+                    custom_name = custom_channel_names.get(channel_id, "")
+                    custom_number = custom_channel_numbers.get(channel_id, "")
+                    custom_genre = custom_genres.get(channel_id, "")
+                    custom_epg_id = custom_epg_ids.get(channel_id, "")
+                    fallback_channel = fallback_channels.get(channel_id, "")
+                    
+                    # Upsert into database
+                    cursor.execute('''
+                        INSERT INTO channels (
+                            portal, channel_id, portal_name, name, number, genre, logo,
+                            enabled, custom_name, custom_number, custom_genre, 
+                            custom_epg_id, fallback_channel
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(portal, channel_id) DO UPDATE SET
+                            portal_name = excluded.portal_name,
+                            name = excluded.name,
+                            number = excluded.number,
+                            genre = excluded.genre,
+                            logo = excluded.logo
+                    ''', (
+                        portal_id, channel_id, portal_name, channel_name, channel_number,
+                        genre, logo, enabled, custom_name, custom_number, custom_genre,
+                        custom_epg_id, fallback_channel
+                    ))
+                    
+                    total_channels += 1
+                
+                conn.commit()
+                logger.info(f"Successfully cached {len(all_channels)} channels for {portal_name}")
+            else:
+                logger.error(f"Failed to fetch channels for portal: {portal_name}")
+    
+    conn.close()
+    logger.info(f"Channel cache refresh complete. Total channels: {total_channels}")
+    return total_channels
 
 
 def authorise(f):
@@ -435,94 +593,128 @@ def editor():
 @app.route("/editor_data", methods=["GET"])
 @authorise
 def editor_data():
-    channels = []
-    portals = getPortals()
-    for portal in portals:
-        logger.info(f"getting Data from {portal}")
-        if portals[portal]["enabled"] == "true":
-            portalName = portals[portal]["name"]
-            url = portals[portal]["url"]
-            macs = list(portals[portal]["macs"].keys())
-            proxy = portals[portal]["proxy"]
-            enabledChannels = portals[portal].get("enabled channels", [])
-            customChannelNames = portals[portal].get("custom channel names", {})
-            customGenres = portals[portal].get("custom genres", {})
-            customChannelNumbers = portals[portal].get("custom channel numbers", {})
-            customEpgIds = portals[portal].get("custom epg ids", {})
-            fallbackChannels = portals[portal].get("fallback channels", {})
-
-            for mac in macs:
-                logger.info(f"Using mac: {mac}")
-                try:
-                    token = stb.getToken(url, mac, proxy)
-                    stb.getProfile(url, mac, token, proxy)
-                    allChannels = stb.getAllChannels(url, mac, token, proxy)
-                    genres = stb.getGenreNames(url, mac, token, proxy)
-                    break
-                except:
-                    allChannels = None
-                    genres = None
-
-            if allChannels and genres:
-                for channel in allChannels:
-                    channelId = str(channel["id"])
-                    channelName = str(channel["name"])
-                    channelNumber = str(channel["number"])
-                    genre = str(genres.get(str(channel["tv_genre_id"])))
-                    if channelId in enabledChannels:
-                        enabled = True
-                    else:
-                        enabled = False
-                    customChannelNumber = customChannelNumbers.get(channelId)
-                    if customChannelNumber == None:
-                        customChannelNumber = ""
-                    customChannelName = customChannelNames.get(channelId)
-                    if customChannelName == None:
-                        customChannelName = ""
-                    customGenre = customGenres.get(channelId)
-                    if customGenre == None:
-                        customGenre = ""
-                    customEpgId = customEpgIds.get(channelId)
-                    if customEpgId == None:
-                        customEpgId = ""
-                    fallbackChannel = fallbackChannels.get(channelId)
-                    if fallbackChannel == None:
-                        fallbackChannel = ""
-                    channels.append(
-                        {
-                            "portal": portal,
-                            "portalName": portalName,
-                            "enabled": enabled,
-                            "channelNumber": channelNumber,
-                            "customChannelNumber": customChannelNumber,
-                            "channelName": channelName,
-                            "customChannelName": customChannelName,
-                            "genre": genre,
-                            "customGenre": customGenre,
-                            "channelId": channelId,
-                            "customEpgId": customEpgId,
-                            "fallbackChannel": fallbackChannel,
-                            "link": "http://"
-                            + host
-                            + "/play/"
-                            + portal
-                            + "/"
-                            + channelId
-                            + "?web=true",
-                        }
-                    )
-            else:
-                logger.error(
-                    "Error getting channel data for {}, skipping".format(portalName)
-                )
-                flash(
-                    "Error getting channel data for {}, skipping".format(portalName),
-                    "danger",
-                )
-
-    data = {"data": channels}
-
-    return flask.jsonify(data)
+    """Server-side DataTables endpoint with pagination and filtering."""
+    try:
+        # Get DataTables parameters
+        draw = request.args.get('draw', type=int, default=1)
+        start = request.args.get('start', type=int, default=0)
+        length = request.args.get('length', type=int, default=250)
+        search_value = request.args.get('search[value]', default='')
+        
+        # Get ordering parameters
+        order_column_idx = request.args.get('order[0][column]', type=int, default=2)
+        order_dir = request.args.get('order[0][dir]', default='asc')
+        
+        # Map column indices to database columns
+        column_map = {
+            0: 'enabled',
+            1: 'channel_id',  # Play button, not sortable but needs a column
+            2: 'name',  # Channel name
+            3: 'genre',
+            4: 'number',
+            5: 'channel_id',  # EPG ID
+            6: 'fallback_channel',
+            7: 'portal_name'
+        }
+        
+        order_column = column_map.get(order_column_idx, 'name')
+        
+        # Build the SQL query
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Base query
+        base_query = "FROM channels WHERE 1=1"
+        params = []
+        
+        # Add search filter if provided
+        if search_value:
+            base_query += """ AND (
+                name LIKE ? OR 
+                custom_name LIKE ? OR 
+                genre LIKE ? OR 
+                custom_genre LIKE ? OR
+                number LIKE ? OR
+                custom_number LIKE ? OR
+                portal_name LIKE ?
+            )"""
+            search_param = f"%{search_value}%"
+            params.extend([search_param] * 7)
+        
+        # Get total count (without filters)
+        cursor.execute("SELECT COUNT(*) FROM channels")
+        records_total = cursor.fetchone()[0]
+        
+        # Get filtered count
+        count_query = f"SELECT COUNT(*) {base_query}"
+        cursor.execute(count_query, params)
+        records_filtered = cursor.fetchone()[0]
+        
+        # Build the main query with ordering and pagination
+        # For custom fields, use COALESCE to fall back to original value
+        if order_column == 'name':
+            order_clause = f"ORDER BY COALESCE(NULLIF(custom_name, ''), name) {order_dir}"
+        elif order_column == 'genre':
+            order_clause = f"ORDER BY COALESCE(NULLIF(custom_genre, ''), genre) {order_dir}"
+        elif order_column == 'number':
+            order_clause = f"ORDER BY CAST(COALESCE(NULLIF(custom_number, ''), number) AS INTEGER) {order_dir}"
+        else:
+            order_clause = f"ORDER BY {order_column} {order_dir}"
+        
+        data_query = f"""
+            SELECT 
+                portal, channel_id, portal_name, name, number, genre, logo,
+                enabled, custom_name, custom_number, custom_genre, 
+                custom_epg_id, fallback_channel
+            {base_query}
+            {order_clause}
+            LIMIT ? OFFSET ?
+        """
+        
+        params.extend([length, start])
+        cursor.execute(data_query, params)
+        
+        # Format the results for DataTables
+        channels = []
+        for row in cursor.fetchall():
+            portal = row['portal']
+            channel_id = row['channel_id']
+            
+            channels.append({
+                "portal": portal,
+                "portalName": row['portal_name'] or '',
+                "enabled": bool(row['enabled']),
+                "channelNumber": row['number'] or '',
+                "customChannelNumber": row['custom_number'] or '',
+                "channelName": row['name'] or '',
+                "customChannelName": row['custom_name'] or '',
+                "genre": row['genre'] or '',
+                "customGenre": row['custom_genre'] or '',
+                "channelId": channel_id,
+                "customEpgId": row['custom_epg_id'] or '',
+                "fallbackChannel": row['fallback_channel'] or '',
+                "link": f"http://{host}/play/{portal}/{channel_id}?web=true"
+            })
+        
+        conn.close()
+        
+        # Return DataTables format
+        return flask.jsonify({
+            "draw": draw,
+            "recordsTotal": records_total,
+            "recordsFiltered": records_filtered,
+            "data": channels
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in editor_data: {e}")
+        return flask.jsonify({
+            "draw": draw if 'draw' in locals() else 1,
+            "recordsTotal": 0,
+            "recordsFiltered": 0,
+            "data": [],
+            "error": str(e)
+        }), 500
 
 
 @app.route("/editor/save", methods=["POST"])
@@ -533,77 +725,102 @@ def editorSave():
     threading.Thread(target=refresh_xmltv, daemon=True).start() #Force update in a seperate thread
     last_playlist_host = None     # The playlist will be updated next time it is downloaded
     Thread(target=refresh_lineup).start() # Update the channel lineup for plex.
+    
     enabledEdits = json.loads(request.form["enabledEdits"])
     numberEdits = json.loads(request.form["numberEdits"])
     nameEdits = json.loads(request.form["nameEdits"])
     genreEdits = json.loads(request.form["genreEdits"])
     epgEdits = json.loads(request.form["epgEdits"])
     fallbackEdits = json.loads(request.form["fallbackEdits"])
-    portals = getPortals()
-    for edit in enabledEdits:
-        portal = edit["portal"]
-        channelId = edit["channel id"]
-        enabled = edit["enabled"]
-        if enabled:
-            portals[portal].setdefault("enabled channels", [])
-            portals[portal]["enabled channels"].append(channelId)
-        else:
-            portals[portal]["enabled channels"] = list(
-                filter((channelId).__ne__, portals[portal]["enabled channels"])
-            )
-
-    for edit in numberEdits:
-        portal = edit["portal"]
-        channelId = edit["channel id"]
-        customNumber = edit["custom number"]
-        if customNumber:
-            portals[portal].setdefault("custom channel numbers", {})
-            portals[portal]["custom channel numbers"].update({channelId: customNumber})
-        else:
-            portals[portal]["custom channel numbers"].pop(channelId)
-
-    for edit in nameEdits:
-        portal = edit["portal"]
-        channelId = edit["channel id"]
-        customName = edit["custom name"]
-        if customName:
-            portals[portal].setdefault("custom channel names", {})
-            portals[portal]["custom channel names"].update({channelId: customName})
-        else:
-            portals[portal]["custom channel names"].pop(channelId)
-
-    for edit in genreEdits:
-        portal = edit["portal"]
-        channelId = edit["channel id"]
-        customGenre = edit["custom genre"]
-        if customGenre:
-            portals[portal].setdefault("custom genres", {})
-            portals[portal]["custom genres"].update({channelId: customGenre})
-        else:
-            portals[portal]["custom genres"].pop(channelId)
-
-    for edit in epgEdits:
-        portal = edit["portal"]
-        channelId = edit["channel id"]
-        customEpgId = edit["custom epg id"]
-        if customEpgId:
-            portals[portal].setdefault("custom epg ids", {})
-            portals[portal]["custom epg ids"].update({channelId: customEpgId})
-        else:
-            portals[portal]["custom epg ids"].pop(channelId)
-
-    for edit in fallbackEdits:
-        portal = edit["portal"]
-        channelId = edit["channel id"]
-        channelName = edit["channel name"]
-        if channelName:
-            portals[portal].setdefault("fallback channels", {})
-            portals[portal]["fallback channels"].update({channelId: channelName})
-        else:
-            portals[portal]["fallback channels"].pop(channelId)
-
-    savePortals(portals)
-    logger.info("Playlist config saved!")
+    
+    # Update SQLite database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Process enabled/disabled edits
+        for edit in enabledEdits:
+            portal = edit["portal"]
+            channel_id = edit["channel id"]
+            enabled = 1 if edit["enabled"] else 0
+            
+            cursor.execute('''
+                UPDATE channels 
+                SET enabled = ? 
+                WHERE portal = ? AND channel_id = ?
+            ''', (enabled, portal, channel_id))
+        
+        # Process custom number edits
+        for edit in numberEdits:
+            portal = edit["portal"]
+            channel_id = edit["channel id"]
+            custom_number = edit["custom number"]
+            
+            cursor.execute('''
+                UPDATE channels 
+                SET custom_number = ? 
+                WHERE portal = ? AND channel_id = ?
+            ''', (custom_number, portal, channel_id))
+        
+        # Process custom name edits
+        for edit in nameEdits:
+            portal = edit["portal"]
+            channel_id = edit["channel id"]
+            custom_name = edit["custom name"]
+            
+            cursor.execute('''
+                UPDATE channels 
+                SET custom_name = ? 
+                WHERE portal = ? AND channel_id = ?
+            ''', (custom_name, portal, channel_id))
+        
+        # Process custom genre edits
+        for edit in genreEdits:
+            portal = edit["portal"]
+            channel_id = edit["channel id"]
+            custom_genre = edit["custom genre"]
+            
+            cursor.execute('''
+                UPDATE channels 
+                SET custom_genre = ? 
+                WHERE portal = ? AND channel_id = ?
+            ''', (custom_genre, portal, channel_id))
+        
+        # Process custom EPG ID edits
+        for edit in epgEdits:
+            portal = edit["portal"]
+            channel_id = edit["channel id"]
+            custom_epg_id = edit["custom epg id"]
+            
+            cursor.execute('''
+                UPDATE channels 
+                SET custom_epg_id = ? 
+                WHERE portal = ? AND channel_id = ?
+            ''', (custom_epg_id, portal, channel_id))
+        
+        # Process fallback channel edits
+        for edit in fallbackEdits:
+            portal = edit["portal"]
+            channel_id = edit["channel id"]
+            fallback_channel = edit["channel name"]
+            
+            cursor.execute('''
+                UPDATE channels 
+                SET fallback_channel = ? 
+                WHERE portal = ? AND channel_id = ?
+            ''', (fallback_channel, portal, channel_id))
+        
+        conn.commit()
+        logger.info("Channel edits saved to database!")
+        
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error saving channel edits: {e}")
+        flash(f"Error saving changes: {e}", "danger")
+        return redirect("/editor", code=302)
+    finally:
+        conn.close()
+    
     flash("Playlist config saved!", "success")
     return redirect("/editor", code=302)
 
@@ -611,19 +828,46 @@ def editorSave():
 @app.route("/editor/reset", methods=["POST"])
 @authorise
 def editorReset():
-    portals = getPortals()
-    for portal in portals:
-        portals[portal]["enabled channels"] = []
-        portals[portal]["custom channel numbers"] = {}
-        portals[portal]["custom channel names"] = {}
-        portals[portal]["custom genres"] = {}
-        portals[portal]["custom epg ids"] = {}
-        portals[portal]["fallback channels"] = {}
-
-    savePortals(portals)
-    logger.info("Playlist reset!")
-    flash("Playlist reset!", "success")
+    """Reset all channel customizations in the database."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            UPDATE channels 
+            SET enabled = 0,
+                custom_name = '',
+                custom_number = '',
+                custom_genre = '',
+                custom_epg_id = '',
+                fallback_channel = ''
+        ''')
+        
+        conn.commit()
+        logger.info("All channel customizations reset!")
+        flash("Playlist reset!", "success")
+        
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error resetting channels: {e}")
+        flash(f"Error resetting: {e}", "danger")
+    finally:
+        conn.close()
+    
     return redirect("/editor", code=302)
+
+
+@app.route("/editor/refresh", methods=["POST"])
+@authorise
+def editorRefresh():
+    """Manually trigger a refresh of the channel cache."""
+    try:
+        total = refresh_channels_cache()
+        logger.info(f"Channel cache refreshed: {total} channels")
+        return flask.jsonify({"status": "success", "total": total})
+    except Exception as e:
+        logger.error(f"Error refreshing channel cache: {e}")
+        return flask.jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/settings", methods=["GET"])
@@ -677,100 +921,68 @@ def update_playlistm3u():
 
 def generate_playlist():
     global cached_playlist
-    logger.info("Generating playlist.m3u...")
+    logger.info("Generating playlist.m3u from database...")
 
     # Detect the host dynamically from the request
     playlist_host = host
     
     channels = []
-    portals = getPortals()
-
-    for portal in portals:
-        if portals[portal]["enabled"] == "true":
-            enabledChannels = portals[portal].get("enabled channels", [])
-            if len(enabledChannels) != 0:
-                name = portals[portal]["name"]
-                url = portals[portal]["url"]
-                macs = list(portals[portal]["macs"].keys())
-                proxy = portals[portal]["proxy"]
-                customChannelNames = portals[portal].get("custom channel names", {})
-                customGenres = portals[portal].get("custom genres", {})
-                customChannelNumbers = portals[portal].get("custom channel numbers", {})
-                customEpgIds = portals[portal].get("custom epg ids", {})
-
-                for mac in macs:
-                    try:
-                        token = stb.getToken(url, mac, proxy)
-                        stb.getProfile(url, mac, token, proxy)
-                        allChannels = stb.getAllChannels(url, mac, token, proxy)
-                        genres = stb.getGenreNames(url, mac, token, proxy)
-                        break
-                    except:
-                        allChannels = None
-                        genres = None
-
-                if allChannels and genres:
-                    for channel in allChannels:
-                        channelId = str(channel.get("id"))
-                        if channelId in enabledChannels:
-                            channelName = customChannelNames.get(channelId)
-                            if channelName is None:
-                                channelName = str(channel.get("name"))
-                            genre = customGenres.get(channelId)
-                            if genre is None:
-                                genreId = str(channel.get("tv_genre_id"))
-                                genre = str(genres.get(genreId))
-                            channelNumber = customChannelNumbers.get(channelId)
-                            if channelNumber is None:
-                                channelNumber = str(channel.get("number"))
-                            epgId = customEpgIds.get(channelId)
-                            if epgId is None:
-                                epgId = channelName
-                            channels.append(
-                                "#EXTINF:-1"
-                                + ' tvg-id="'
-                                + epgId
-                                + (
-                                    '" tvg-chno="' + channelNumber
-                                    if getSettings().get("use channel numbers", "true")
-                                    == "true"
-                                    else ""
-                                )
-                                + (
-                                    '" group-title="' + genre
-                                    if getSettings().get("use channel genres", "true")
-                                    == "true"
-                                    else ""
-                                )
-                                + '",'
-                                + channelName
-                                + "\n"
-                                + "http://"
-                                + playlist_host  # Use the dynamically detected playlist host
-                                + "/play/"
-                                + portal
-                                + "/"
-                                + channelId
-                            )
-                else:
-                    logger.error("Error making playlist for {}, skipping".format(name))
-
-    # Sorting the playlist based on settings
+    
+    # Read enabled channels from database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Build order clause based on settings
+    order_clause = ""
     if getSettings().get("sort playlist by channel name", "true") == "true":
-        channels.sort(key=lambda k: k.split(",")[1].split("\n")[0])
-    if getSettings().get("use channel numbers", "true") == "true":
+        order_clause = "ORDER BY COALESCE(NULLIF(custom_name, ''), name)"
+    elif getSettings().get("use channel numbers", "true") == "true":
         if getSettings().get("sort playlist by channel number", "false") == "true":
-            channels.sort(key=lambda k: k.split('tvg-chno="')[1].split('"')[0])
-    if getSettings().get("use channel genres", "true") == "true":
+            order_clause = "ORDER BY CAST(COALESCE(NULLIF(custom_number, ''), number) AS INTEGER)"
+    elif getSettings().get("use channel genres", "true") == "true":
         if getSettings().get("sort playlist by channel genre", "false") == "true":
-            channels.sort(key=lambda k: k.split('group-title="')[1].split('"')[0])
+            order_clause = "ORDER BY COALESCE(NULLIF(custom_genre, ''), genre)"
+    
+    cursor.execute(f'''
+        SELECT 
+            portal, channel_id, name, number, genre,
+            custom_name, custom_number, custom_genre, custom_epg_id
+        FROM channels
+        WHERE enabled = 1
+        {order_clause}
+    ''')
+    
+    for row in cursor.fetchall():
+        portal = row['portal']
+        channel_id = row['channel_id']
+        
+        # Use custom values if available, otherwise use defaults
+        channel_name = row['custom_name'] if row['custom_name'] else row['name']
+        channel_number = row['custom_number'] if row['custom_number'] else row['number']
+        genre = row['custom_genre'] if row['custom_genre'] else row['genre']
+        epg_id = row['custom_epg_id'] if row['custom_epg_id'] else channel_name
+        
+        channel_entry = "#EXTINF:-1" + ' tvg-id="' + epg_id
+        
+        if getSettings().get("use channel numbers", "true") == "true":
+            channel_entry += '" tvg-chno="' + str(channel_number)
+        
+        if getSettings().get("use channel genres", "true") == "true":
+            channel_entry += '" group-title="' + str(genre)
+        
+        channel_entry += '",' + channel_name + "\n"
+        channel_entry += f"http://{playlist_host}/play/{portal}/{channel_id}"
+        
+        channels.append(channel_entry)
+    
+    conn.close()
 
     playlist = "#EXTM3U \n"
     playlist = playlist + "\n".join(channels)
 
     # Update the cache
     cached_playlist = playlist
-    logger.info("Playlist generated and cached.")
+    logger.info(f"Playlist generated and cached with {len(channels)} channels.")
     
 def refresh_xmltv():
     settings = getSettings()
@@ -1031,6 +1243,7 @@ def channel(portalId, channelId):
     proxy = portal.get("proxy")
     web = request.args.get("web")
     ip = request.remote_addr
+    channelName = portal.get("custom channel names", {}).get(channelId)
 
     logger.info(
         "IP({}) requested Portal({}):Channel({})".format(ip, portalId, channelId)
@@ -1131,7 +1344,7 @@ def channel(portalId, channelId):
         for portal in portals:
             if portals[portal]["enabled"] == "true":
                 fallbackChannels = portals[portal]["fallback channels"]
-                if channelName in fallbackChannels.values():
+                if channelName and channelName in fallbackChannels.values():
                     url = portals[portal].get("url")
                     macs = list(portals[portal]["macs"].keys())
                     proxy = portals[portal].get("proxy")
@@ -1330,60 +1543,38 @@ def status():
 # Function to refresh the lineup
 def refresh_lineup():
     global cached_lineup
-    logger.info("Refreshing Lineup...")
+    logger.info("Refreshing Lineup from database...")
     lineup = []
-    portals = getPortals()
-    for portal in portals:
-        if portals[portal]["enabled"] == "true":
-            enabledChannels = portals[portal].get("enabled channels", [])
-            if len(enabledChannels) != 0:
-                name = portals[portal]["name"]
-                url = portals[portal]["url"]
-                macs = list(portals[portal]["macs"].keys())
-                proxy = portals[portal]["proxy"]
-                customChannelNames = portals[portal].get("custom channel names", {})
-                customChannelNumbers = portals[portal].get("custom channel numbers", {})
-
-                for mac in macs:
-                    try:
-                        token = stb.getToken(url, mac, proxy)
-                        stb.getProfile(url, mac, token, proxy)
-                        allChannels = stb.getAllChannels(url, mac, token, proxy)
-                        break
-                    except:
-                        allChannels = None
-
-                if allChannels:
-                    for channel in allChannels:
-                        channelId = str(channel.get("id"))
-                        if channelId in enabledChannels:
-                            channelName = customChannelNames.get(channelId)
-                            if channelName is None:
-                                channelName = str(channel.get("name"))
-                            channelNumber = customChannelNumbers.get(channelId)
-                            if channelNumber is None:
-                                channelNumber = str(channel.get("number"))
-
-                            lineup.append(
-                                {
-                                    "GuideNumber": channelNumber,
-                                    "GuideName": channelName,
-                                    "URL": "http://"
-                                    + host
-                                    + "/play/"
-                                    + portal
-                                    + "/"
-                                    + channelId,
-                                }
-                            )
-                else:
-                    logger.error("Error making lineup for {}, skipping".format(name))
     
-    # Sort lineup by GuideNumber
-    lineup.sort(key=lambda x: int(x["GuideNumber"]))
+    # Read enabled channels from database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT 
+            portal, channel_id, name, number,
+            custom_name, custom_number
+        FROM channels
+        WHERE enabled = 1
+        ORDER BY CAST(COALESCE(NULLIF(custom_number, ''), number) AS INTEGER)
+    ''')
+    
+    for row in cursor.fetchall():
+        portal = row['portal']
+        channel_id = row['channel_id']
+        channel_name = row['custom_name'] if row['custom_name'] else row['name']
+        channel_number = row['custom_number'] if row['custom_number'] else row['number']
+        
+        lineup.append({
+            "GuideNumber": str(channel_number),
+            "GuideName": channel_name,
+            "URL": f"http://{host}/play/{portal}/{channel_id}"
+        })
+    
+    conn.close()
 
     cached_lineup = lineup
-    logger.info("Lineup Refreshed.")
+    logger.info(f"Lineup refreshed with {len(lineup)} channels.")
     
     
 # Endpoint to get the current lineup
@@ -1411,6 +1602,9 @@ def start_refresh():
     
 if __name__ == "__main__":
     config = loadConfig()
+    
+    # Initialize the database
+    init_db()
 
     # Start the refresh thread before the server
     start_refresh()

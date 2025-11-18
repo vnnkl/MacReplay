@@ -96,6 +96,39 @@ The playlist editor features a completely redesigned interface with powerful man
 
 ---
 
+## **Testing**
+
+MacReplay includes a test suite to ensure code quality and prevent regressions.
+
+### **Running Tests**
+
+1. **Install test dependencies** (if not already installed):
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Run all tests**:
+   ```bash
+   pytest
+   ```
+
+3. **Run tests with verbose output**:
+   ```bash
+   pytest -v
+   ```
+
+### **Test Coverage**
+
+The test suite includes:
+- **App Initialization**: Verifies basic routes and redirects work correctly
+- **Channel Streaming**: Tests successful channel lookup and streaming functionality
+- **Fallback Logic**: Ensures fallback channels work when primary streams fail
+- **Error Handling**: Regression tests to prevent crashes (e.g., `UnboundLocalError` fixes)
+
+Tests use mocking to avoid dependencies on external services or filesystem configuration, making them fast and reliable.
+
+---
+
 ## **Playlist Editor Guide**
 
 ### **Managing Large Channel Lists**
