@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
+import app
 
 def test_home_redirect(client, mock_config):
     """Test that the home page redirects to /portals"""
@@ -127,4 +128,43 @@ def test_fallback_logic_works(client, mock_config, mocker):
     
     assert response.status_code == 200
     assert b"fallback_data" in response.get_data()
+
+def test_editor_save_resets_playlist_host(client, mock_config, mocker):
+    """
+    Regression test for global variable bug:
+    Verify that editorSave() properly resets the global last_playlist_host variable
+    to None, forcing playlist regeneration on the next request.
+    """
+    # Set the global variable to a non-None value
+    app.last_playlist_host = "example.com:8080"
+    
+    # Mock database operations
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+    mocker.patch('app.get_db_connection', return_value=mock_conn)
+    
+    # Mock threading operations
+    mocker.patch('app.threading.Thread')
+    mocker.patch('app.Thread')
+    
+    # Prepare form data (empty edits for simplicity)
+    form_data = {
+        'enabledEdits': '[]',
+        'numberEdits': '[]',
+        'nameEdits': '[]',
+        'genreEdits': '[]',
+        'epgEdits': '[]',
+        'fallbackEdits': '[]'
+    }
+    
+    # Call the endpoint
+    response = client.post('/editor/save', data=form_data)
+    
+    # Verify the response is successful (redirect to /editor)
+    assert response.status_code == 302
+    assert '/editor' in response.location
+    
+    # Verify the global variable was reset to None
+    assert app.last_playlist_host is None, "last_playlist_host should be reset to None after editorSave()"
 

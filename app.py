@@ -720,7 +720,7 @@ def editor_data():
 @app.route("/editor/save", methods=["POST"])
 @authorise
 def editorSave():
-    global cached_xmltv
+    global cached_xmltv, last_playlist_host
     #cached_xmltv = None # The tv guide will be updated next time its downloaded
     threading.Thread(target=refresh_xmltv, daemon=True).start() #Force update in a seperate thread
     last_playlist_host = None     # The playlist will be updated next time it is downloaded
