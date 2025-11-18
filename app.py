@@ -1595,9 +1595,26 @@ def refresh_lineup_endpoint():
     return jsonify({"status": "Lineup refreshed successfully"})
 
 def start_refresh():
-    # Run refresh_lineup in a separate thread
-    threading.Thread(target=refresh_lineup, daemon=True).start()
-    threading.Thread(target=refresh_xmltv, daemon=True).start()
+    # Run refresh functions in separate threads
+    # First refresh channels cache, then refresh lineup and xmltv
+    def refresh_all():
+        # Check if database has any channels
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM channels")
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        # If no channels in database, refresh from portals
+        if count == 0:
+            logger.info("No channels in database, fetching from portals...")
+            refresh_channels_cache()
+        
+        # Then refresh lineup and xmltv
+        refresh_lineup()
+        refresh_xmltv()
+    
+    threading.Thread(target=refresh_all, daemon=True).start()
     
     
 if __name__ == "__main__":
