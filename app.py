@@ -447,8 +447,10 @@ def portalsAdd():
     macsd = {}
 
     for mac in macs:
+        logger.info(f"Testing MAC({mac}) for Portal({name})...")
         token = stb.getToken(url, mac, proxy)
         if token:
+            logger.debug(f"Got token for MAC({mac}), getting profile and expiry...")
             stb.getProfile(url, mac, token, proxy)
             expiry = stb.getExpires(url, mac, token, proxy)
             if expiry:
@@ -461,6 +463,10 @@ def portalsAdd():
                     "success",
                 )
                 continue
+            else:
+                logger.error(f"Failed to get expiry for MAC({mac}) for Portal({name})")
+        else:
+            logger.error(f"Failed to get token for MAC({mac}) for Portal({name})")
 
         logger.error("Error testing MAC({}) for Portal({})".format(mac, name))
         flash("Error testing MAC({}) for Portal({})".format(mac, name), "danger")
@@ -524,8 +530,10 @@ def portalUpdate():
 
     for mac in newmacs:
         if retest or mac not in oldmacs.keys():
+            logger.info(f"Testing MAC({mac}) for Portal({name})...")
             token = stb.getToken(url, mac, proxy)
             if token:
+                logger.debug(f"Got token for MAC({mac}), getting profile and expiry...")
                 stb.getProfile(url, mac, token, proxy)
                 expiry = stb.getExpires(url, mac, token, proxy)
                 if expiry:
@@ -537,6 +545,10 @@ def portalUpdate():
                         "Successfully tested MAC({}) for Portal({})".format(mac, name),
                         "success",
                     )
+                else:
+                    logger.error(f"Failed to get expiry for MAC({mac}) for Portal({name})")
+            else:
+                logger.error(f"Failed to get token for MAC({mac}) for Portal({name})")
 
             if mac not in list(macsout.keys()):
                 deadmacs.append(mac)
