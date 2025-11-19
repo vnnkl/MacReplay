@@ -223,10 +223,6 @@
         player.src = "";
     })
 
-    // Note: With server-side processing, we don't populate filters from client-side data
-    // The portal and genre filters would need to be implemented as additional server-side filters
-    // For now, we'll use the global search functionality which is server-side
-
     /* Create an array with the values of all the checkboxes in a column */
     $.fn.dataTable.ext.order['dom-checkbox'] = function (settings, col) {
         return this.api().column(col, { order: 'index' }).nodes().map(function (td, i) {
@@ -250,15 +246,49 @@
         });
     };
 
+    // Populate filter dropdowns
+    function populateFilters() {
+        // Populate portals dropdown
+        fetch('/editor/portals')
+            .then(res => res.json())
+            .then(data => {
+                const select = document.getElementById('portalFilter');
+                data.portals.forEach(portal => {
+                    const option = document.createElement('option');
+                    option.value = portal;
+                    option.textContent = portal;
+                    select.appendChild(option);
+                });
+            })
+            .catch(err => console.error('Error loading portals:', err));
+
+        // Populate genres dropdown
+        fetch('/editor/genres')
+            .then(res => res.json())
+            .then(data => {
+                const select = document.getElementById('genreFilter');
+                data.genres.forEach(genre => {
+                    const option = document.createElement('option');
+                    option.value = genre;
+                    option.textContent = genre;
+                    select.appendChild(option);
+                });
+            })
+            .catch(err => console.error('Error loading genres:', err));
+    }
+
     $(document).ready(function () {
+        // Populate filter dropdowns
+        populateFilters();
+
         dataTable = $('#table').DataTable({
             dom: "<'row m-1'<'col-auto'B><'col-auto ms-auto'f><'col-auto'l>>" +
                 "<'row'<'col-12'tr>>" +
                 "<'row mb-1 mb-lg-0'<'col-auto text-light'i><'col-auto ms-auto'p>>",
             serverSide: true,
             processing: true,
-            orderFixed: [0, 'des'],
-            order: [[0, 'des'], [2, 'asc']],
+            orderFixed: [0, 'desc'],
+            order: [[0, 'desc'], [2, 'asc']],
             pageLength: 250,
             lengthMenu: [[25, 50, 100, 250, 500, 1000], [25, 50, 100, 250, 500, 1000]],
             columnDefs: [
@@ -311,7 +341,13 @@
             ajax: {
                 "url": "{{ url_for('editor_data') }}",
                 "dataType": "json",
-                "contentType": "application/json"
+                "contentType": "application/json",
+                "data": function(d) {
+                    // Add custom filter parameters
+                    d.portal = $('#portalFilter').val();
+                    d.genre = $('#genreFilter').val();
+                    d.duplicates = $('#duplicateFilter').val();
+                }
             },
             columns: [
                 {
@@ -351,7 +387,12 @@
                 {
                     data: "channelName",
                     render: function (data, type, row, meta) {
-                        return '<input \
+                        var duplicateBadge = '';
+                        if (row.duplicateCount && row.duplicateCount > 1) {
+                            duplicateBadge = '<span class="duplicate-badge">' + row.duplicateCount + 'x enabled</span>';
+                        }
+                        return '<div style="display: flex; align-items: center; gap: 5px;">' +
+                               '<input \
                                 type="text" \
                                 class="form-control" \
                                 style="min-width: 200px;" \
@@ -360,7 +401,9 @@
                                 data-channelId="' + row.channelId + '" \
                                 placeholder="' + row.channelName + '" \
                                 title="' + row.channelName + '" \
-                                value="' + row.customChannelName + '">'
+                                value="' + row.customChannelName + '">' +
+                               duplicateBadge +
+                               '</div>';
                     },
                 },
                 {
@@ -427,8 +470,39 @@
                 { data: "portalName" },
             ],
         });
+
+        // Add filter change event handlers
+        $('#portalFilter, #genreFilter, #duplicateFilter').on('change', function() {
+            dataTable.ajax.reload();
+        });
     });
     
+    // Function to deactivate duplicate enabled channels
+    function deactivateDuplicates() {
+        if (!confirm('This will deactivate all duplicate enabled channels, keeping only the first occurrence of each. Continue?')) {
+            return;
+        }
+
+        fetch('/editor/deactivate-duplicates', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Successfully deactivated ' + data.deactivated + ' duplicate channels!');
+                dataTable.ajax.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error deactivating duplicates: ' + error);
+        });
+    }
+
     // Function to refresh channels from portal
     function refreshChannels() {
         if (!confirm('This will fetch the latest channel list from your portals. This may take a few minutes. Continue?')) {
