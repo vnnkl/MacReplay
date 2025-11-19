@@ -783,6 +783,155 @@ def editor_data():
         }), 500
 
 
+@app.route("/editor/portals", methods=["GET"])
+@authorise
+def editor_portals():
+    """Get list of unique portals for filter dropdown."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT DISTINCT portal_name
+            FROM channels
+            WHERE portal_name IS NOT NULL AND portal_name != ''
+            ORDER BY portal_name
+        """)
+        
+        portals = [row['portal_name'] for row in cursor.fetchall()]
+        conn.close()
+        
+        return flask.jsonify({"portals": portals})
+    except Exception as e:
+        logger.error(f"Error in editor_portals: {e}")
+        return flask.jsonify({"portals": [], "error": str(e)}), 500
+
+
+@app.route("/editor/genres", methods=["GET"])
+@authorise
+def editor_genres():
+    """Get list of unique genres for filter dropdown."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT DISTINCT COALESCE(NULLIF(custom_genre, ''), genre) as genre
+            FROM channels
+            WHERE COALESCE(NULLIF(custom_genre, ''), genre) IS NOT NULL 
+                AND COALESCE(NULLIF(custom_genre, ''), genre) != ''
+                AND COALESCE(NULLIF(custom_genre, ''), genre) != 'None'
+            ORDER BY genre
+        """)
+        
+        genres = [row['genre'] for row in cursor.fetchall()]
+        conn.close()
+        
+        return flask.jsonify({"genres": genres})
+    except Exception as e:
+        logger.error(f"Error in editor_genres: {e}")
+        return flask.jsonify({"genres": [], "error": str(e)}), 500
+
+
+@app.route("/editor/duplicate-counts", methods=["GET"])
+@authorise
+def editor_duplicate_counts():
+    """Get duplicate counts for all channel names (only enabled channels)."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                COALESCE(NULLIF(custom_name, ''), name) as channel_name,
+                COUNT(*) as count
+            FROM channels
+            WHERE enabled = 1
+            GROUP BY COALESCE(NULLIF(custom_name, ''), name)
+            ORDER BY count DESC, channel_name
+        """)
+        
+        counts = [{"channel_name": row['channel_name'], "count": row['count']} 
+                 for row in cursor.fetchall()]
+        conn.close()
+        
+        return flask.jsonify({"counts": counts})
+    except Exception as e:
+        logger.error(f"Error in editor_duplicate_counts: {e}")
+        return flask.jsonify({"counts": [], "error": str(e)}), 500
+
+
+@app.route("/editor/deactivate-duplicates", methods=["POST"])
+@authorise
+def editor_deactivate_duplicates():
+    """Deactivate duplicate enabled channels, keeping only the first occurrence."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Find all duplicate channels (using ROW_NUMBER to identify which to keep)
+        find_duplicates_query = """
+            WITH ranked_channels AS (
+                SELECT 
+                    portal,
+                    channel_id,
+                    COALESCE(NULLIF(custom_name, ''), name) as effective_name,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(NULLIF(custom_name, ''), name) 
+                        ORDER BY portal, channel_id
+                    ) as row_num
+                FROM channels
+                WHERE enabled = 1
+            )
+            SELECT portal, channel_id, effective_name, row_num
+            FROM ranked_channels
+            WHERE effective_name IN (
+                SELECT effective_name
+                FROM ranked_channels
+                GROUP BY effective_name
+                HAVING COUNT(*) > 1
+            )
+            AND row_num > 1
+            ORDER BY effective_name, row_num
+        """
+        
+        cursor.execute(find_duplicates_query)
+        duplicates_to_deactivate = cursor.fetchall()
+        
+        # Deactivate the duplicate channels
+        deactivated_count = 0
+        for dup in duplicates_to_deactivate:
+            cursor.execute("""
+                UPDATE channels
+                SET enabled = 0
+                WHERE portal = ? AND channel_id = ?
+            """, (dup['portal'], dup['channel_id']))
+            deactivated_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        # Reset playlist cache to force regeneration
+        global last_playlist_host
+        last_playlist_host = None
+        
+        logger.info(f"Deactivated {deactivated_count} duplicate channels")
+        
+        return flask.jsonify({
+            "success": True,
+            "deactivated": deactivated_count,
+            "message": f"Deactivated {deactivated_count} duplicate channels"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in editor_deactivate_duplicates: {e}")
+        return flask.jsonify({
+            "success": False,
+            "deactivated": 0,
+            "error": str(e)
+        }), 500
+
+
 @app.route("/editor/save", methods=["POST"])
 @authorise
 def editorSave():
