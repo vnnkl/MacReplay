@@ -613,6 +613,11 @@ def editor_data():
         length = request.args.get('length', type=int, default=250)
         search_value = request.args.get('search[value]', default='')
         
+        # Get custom filter parameters
+        portal_filter = request.args.get('portal', default='')
+        genre_filter = request.args.get('genre', default='')
+        duplicate_filter = request.args.get('duplicates', default='')
+        
         # Get ordering parameters
         order_column_idx = request.args.get('order[0][column]', type=int, default=2)
         order_dir = request.args.get('order[0][dir]', default='asc')
@@ -638,6 +643,36 @@ def editor_data():
         # Base query
         base_query = "FROM channels WHERE 1=1"
         params = []
+        
+        # Add portal filter
+        if portal_filter:
+            base_query += " AND portal_name = ?"
+            params.append(portal_filter)
+        
+        # Add genre filter (check both custom_genre and genre)
+        if genre_filter:
+            base_query += " AND (COALESCE(NULLIF(custom_genre, ''), genre) = ?)"
+            params.append(genre_filter)
+        
+        # Add duplicate filter (only for enabled channels)
+        if duplicate_filter == 'enabled_only':
+            # Show only channels where the name appears multiple times among enabled channels
+            base_query += """ AND enabled = 1 AND COALESCE(NULLIF(custom_name, ''), name) IN (
+                SELECT COALESCE(NULLIF(custom_name, ''), name)
+                FROM channels
+                WHERE enabled = 1
+                GROUP BY COALESCE(NULLIF(custom_name, ''), name)
+                HAVING COUNT(*) > 1
+            )"""
+        elif duplicate_filter == 'unique_only':
+            # Show only channels where the name appears once among enabled channels
+            base_query += """ AND COALESCE(NULLIF(custom_name, ''), name) IN (
+                SELECT COALESCE(NULLIF(custom_name, ''), name)
+                FROM channels
+                WHERE enabled = 1
+                GROUP BY COALESCE(NULLIF(custom_name, ''), name)
+                HAVING COUNT(*) = 1
+            )"""
         
         # Add search filter if provided
         if search_value:
@@ -686,11 +721,29 @@ def editor_data():
         params.extend([length, start])
         cursor.execute(data_query, params)
         
+        # Store the channel data results first
+        channel_rows = cursor.fetchall()
+        
+        # Get duplicate counts for enabled channels
+        duplicate_counts_query = """
+            SELECT 
+                COALESCE(NULLIF(custom_name, ''), name) as channel_name,
+                COUNT(*) as count
+            FROM channels
+            WHERE enabled = 1
+            GROUP BY COALESCE(NULLIF(custom_name, ''), name)
+            HAVING COUNT(*) > 1
+        """
+        cursor.execute(duplicate_counts_query)
+        duplicate_counts = {row['channel_name']: row['count'] for row in cursor.fetchall()}
+        
         # Format the results for DataTables
         channels = []
-        for row in cursor.fetchall():
+        for row in channel_rows:
             portal = row['portal']
             channel_id = row['channel_id']
+            channel_name = row['custom_name'] or row['name']
+            duplicate_count = duplicate_counts.get(channel_name, 0)
             
             channels.append({
                 "portal": portal,
@@ -705,7 +758,8 @@ def editor_data():
                 "channelId": channel_id,
                 "customEpgId": row['custom_epg_id'] or '',
                 "fallbackChannel": row['fallback_channel'] or '',
-                "link": f"http://{host}/play/{portal}/{channel_id}?web=true"
+                "link": f"http://{host}/play/{portal}/{channel_id}?web=true",
+                "duplicateCount": duplicate_count if row['enabled'] else 0
             })
         
         conn.close()
