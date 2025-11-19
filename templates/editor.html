@@ -21,6 +21,50 @@
         border-radius: 10px;
         margin-left: 5px;
     }
+    
+    /* Custom Sorting Indicators */
+    table.dataTable thead th {
+        cursor: pointer;
+        user-select: none;
+    }
+    
+    table.dataTable thead th.sorting,
+    table.dataTable thead th.sorting_asc,
+    table.dataTable thead th.sorting_desc {
+        background-image: none !important;
+        padding-right: 30px !important;
+    }
+    
+    /* Add custom sorting arrows */
+    .sort-arrows {
+        display: inline-block;
+        margin-left: 5px;
+        font-size: 0.85em;
+        vertical-align: middle;
+    }
+    
+    .sort-arrows .arrow-up,
+    .sort-arrows .arrow-down {
+        display: block;
+        line-height: 0.7em;
+        opacity: 0.25;
+        color: #999;
+        transition: all 0.2s ease;
+    }
+    
+    /* Active state for ascending sort */
+    table.dataTable.table-dark thead th.sorting_asc .sort-arrows .arrow-up {
+        opacity: 1 !important;
+        color: #ffc107 !important;
+        font-weight: bold;
+    }
+    
+    /* Active state for descending sort */
+    table.dataTable.table-dark thead th.sorting_desc .sort-arrows .arrow-down {
+        opacity: 1 !important;
+        color: #ffc107 !important;
+        font-weight: bold;
+    }
 </style>
 {% endblock %}
 
@@ -287,7 +331,6 @@
                 "<'row mb-1 mb-lg-0'<'col-auto text-light'i><'col-auto ms-auto'p>>",
             serverSide: true,
             processing: true,
-            orderFixed: [0, 'desc'],
             order: [[0, 'desc'], [2, 'asc']],
             pageLength: 250,
             lengthMenu: [[25, 50, 100, 250, 500, 1000], [25, 50, 100, 250, 500, 1000]],
@@ -475,6 +518,16 @@
         $('#portalFilter, #genreFilter, #duplicateFilter').on('change', function() {
             dataTable.ajax.reload();
         });
+        
+        // Add sorting arrows to table headers (after table is initialized)
+        setTimeout(function() {
+            $('#table thead th').each(function() {
+                const $th = $(this);
+                if (!$th.hasClass('sorting_disabled')) {
+                    $th.append('<span class="sort-arrows" style="display: inline-block; margin-left: 5px; font-size: 0.85em; vertical-align: middle;"><span class="arrow-up">▲</span><span class="arrow-down">▼</span></span>');
+                }
+            });
+        }, 100);
     });
     
     // Function to deactivate duplicate enabled channels
