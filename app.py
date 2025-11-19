@@ -619,10 +619,6 @@ def editor_data():
         genre_filter = request.args.get('genre', default='')
         duplicate_filter = request.args.get('duplicates', default='')
         
-        # Get ordering parameters
-        order_column_idx = request.args.get('order[0][column]', type=int, default=2)
-        order_dir = request.args.get('order[0][dir]', default='asc')
-        
         # Map column indices to database columns
         column_map = {
             0: 'enabled',
@@ -630,12 +626,10 @@ def editor_data():
             2: 'name',  # Channel name
             3: 'genre',
             4: 'number',
-            5: 'channel_id',  # EPG ID
+            5: 'epg_id',  # EPG ID - Special handling
             6: 'fallback_channel',
             7: 'portal_name'
         }
-        
-        order_column = column_map.get(order_column_idx, 'name')
         
         # Build the SQL query
         conn = get_db_connection()
@@ -698,16 +692,36 @@ def editor_data():
         cursor.execute(count_query, params)
         records_filtered = cursor.fetchone()[0]
         
-        # Build the main query with ordering and pagination
-        # For custom fields, use COALESCE to fall back to original value
-        if order_column == 'name':
-            order_clause = f"ORDER BY COALESCE(NULLIF(custom_name, ''), name) {order_dir}"
-        elif order_column == 'genre':
-            order_clause = f"ORDER BY COALESCE(NULLIF(custom_genre, ''), genre) {order_dir}"
-        elif order_column == 'number':
-            order_clause = f"ORDER BY CAST(COALESCE(NULLIF(custom_number, ''), number) AS INTEGER) {order_dir}"
-        else:
-            order_clause = f"ORDER BY {order_column} {order_dir}"
+        # Build the ORDER BY clause handling multiple columns
+        order_clauses = []
+        i = 0
+        while True:
+            col_idx_key = f'order[{i}][column]'
+            dir_key = f'order[{i}][dir]'
+            
+            if col_idx_key not in request.args:
+                break
+                
+            col_idx = request.args.get(col_idx_key, type=int)
+            direction = request.args.get(dir_key, default='asc')
+            col_name = column_map.get(col_idx, 'name')
+            
+            if col_name == 'name':
+                order_clauses.append(f"COALESCE(NULLIF(custom_name, ''), name) {direction}")
+            elif col_name == 'genre':
+                order_clauses.append(f"COALESCE(NULLIF(custom_genre, ''), genre) {direction}")
+            elif col_name == 'number':
+                order_clauses.append(f"CAST(COALESCE(NULLIF(custom_number, ''), number) AS INTEGER) {direction}")
+            elif col_name == 'epg_id':
+                order_clauses.append(f"COALESCE(NULLIF(custom_epg_id, ''), portal || channel_id) {direction}")
+            else:
+                order_clauses.append(f"{col_name} {direction}")
+            i += 1
+            
+        if not order_clauses:
+            order_clauses.append("COALESCE(NULLIF(custom_name, ''), name) ASC")
+            
+        order_clause = "ORDER BY " + ", ".join(order_clauses)
         
         data_query = f"""
             SELECT 
