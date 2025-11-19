@@ -2,6 +2,10 @@ import requests
 from requests.adapters import HTTPAdapter, Retry
 from urllib.parse import urlparse
 import re
+import logging
+
+logger = logging.getLogger("MacReplay.stb")
+logger.setLevel(logging.DEBUG)
 
 s = requests.Session()
 retries = Retry(total=3, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])
@@ -42,7 +46,7 @@ def getUrl(url, proxy=None):
     try:
         for i in urls:
             try:
-                response = s.get(url + i, headers=headers, proxies=proxies)
+                response = s.get(url + i, headers=headers, proxies=proxies, timeout=10)
             except:
                 response = None
             if response:
@@ -54,7 +58,7 @@ def getUrl(url, proxy=None):
     try:
         for i in urls:
             try:
-                response = s.get(url + i, headers=headers)
+                response = s.get(url + i, headers=headers, timeout=10)
             except:
                 response = None
             if response:
@@ -68,17 +72,25 @@ def getToken(url, mac, proxy=None):
     cookies = {"mac": mac, "stb_lang": "en", "timezone": "Europe/London"}
     headers = {"User-Agent": "Mozilla/5.0 (QtEmbedded; U; Linux; C)"}
     try:
+        logger.debug(f"Getting token for MAC {mac} from {url}")
         response = s.get(
             url + "?type=stb&action=handshake&JsHttpRequest=1-xml",
             cookies=cookies,
             headers=headers,
             proxies=proxies,
+            timeout=20,
         )
+        logger.debug(f"Token request status: {response.status_code}")
         token = response.json()["js"]["token"]
         if token:
+            logger.info(f"Successfully got token for MAC {mac}")
             return token
-    except:
-        pass
+    except requests.Timeout:
+        logger.error(f"Timeout getting token for MAC {mac} from {url}")
+    except requests.RequestException as e:
+        logger.error(f"Request error getting token for MAC {mac}: {e}")
+    except Exception as e:
+        logger.error(f"Error getting token for MAC {mac}: {e}")
 
 
 def getProfile(url, mac, token, proxy=None):
@@ -94,6 +106,7 @@ def getProfile(url, mac, token, proxy=None):
             cookies=cookies,
             headers=headers,
             proxies=proxies,
+            timeout=10,
         )
         profile = response.json()["js"]
         if profile:
@@ -110,17 +123,25 @@ def getExpires(url, mac, token, proxy=None):
         "Authorization": "Bearer " + token,
     }
     try:
+        logger.debug(f"Getting expiry for MAC {mac}")
         response = s.get(
             url + "?type=account_info&action=get_main_info&JsHttpRequest=1-xml",
             cookies=cookies,
             headers=headers,
             proxies=proxies,
+            timeout=15,
         )
+        logger.debug(f"Expiry request status: {response.status_code}")
         expires = response.json()["js"]["phone"]
         if expires:
+            logger.info(f"Got expiry for MAC {mac}: {expires}")
             return expires
-    except:
-        pass
+    except requests.Timeout:
+        logger.error(f"Timeout getting expiry for MAC {mac}")
+    except requests.RequestException as e:
+        logger.error(f"Request error getting expiry for MAC {mac}: {e}")
+    except Exception as e:
+        logger.error(f"Error getting expiry for MAC {mac}: {e}")
 
 
 def getAllChannels(url, mac, token, proxy=None):
@@ -131,18 +152,26 @@ def getAllChannels(url, mac, token, proxy=None):
         "Authorization": "Bearer " + token,
     }
     try:
+        logger.debug(f"Getting all channels for MAC {mac}")
         response = s.get(
             url
             + "?type=itv&action=get_all_channels&force_ch_link_check=&JsHttpRequest=1-xml",
             cookies=cookies,
             headers=headers,
             proxies=proxies,
+            timeout=30,
         )
+        logger.debug(f"Channels request status: {response.status_code}")
         channels = response.json()["js"]["data"]
         if channels:
+            logger.info(f"Got {len(channels)} channels for MAC {mac}")
             return channels
-    except:
-        pass
+    except requests.Timeout:
+        logger.error(f"Timeout getting channels for MAC {mac}")
+    except requests.RequestException as e:
+        logger.error(f"Request error getting channels for MAC {mac}: {e}")
+    except Exception as e:
+        logger.error(f"Error getting channels for MAC {mac}: {e}")
 
 
 def getGenres(url, mac, token, proxy=None):
@@ -158,6 +187,7 @@ def getGenres(url, mac, token, proxy=None):
             cookies=cookies,
             headers=headers,
             proxies=proxies,
+            timeout=10,
         )
         genreData = response.json()["js"]
         if genreData:
@@ -196,6 +226,7 @@ def getLink(url, mac, token, cmd, proxy=None):
             cookies=cookies,
             headers=headers,
             proxies=proxies,
+            timeout=10,
         )
         data = response.json()
         link = data["js"]["cmd"].split()[-1]
@@ -221,6 +252,7 @@ def getEpg(url, mac, token, period, proxy=None):
             cookies=cookies,
             headers=headers,
             proxies=proxies,
+            timeout=30,
         )
         data = response.json()["js"]["data"]
         if data:
