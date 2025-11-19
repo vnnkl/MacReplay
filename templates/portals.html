@@ -201,7 +201,7 @@
 
 {% block scripts %}
 <script>
-const portalsData = {{ portals | tojsonfilter }};
+const portalsData = {{ portals | tojson }};
 
 function editPortal(portalId) {
     const portal = portalsData[portalId];
