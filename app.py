@@ -399,8 +399,7 @@ class HLSStreamManager:
             # Input and output settings
             ffmpeg_cmd.extend([
                 "-i", stream_url,
-                "-c:v", "copy",
-                "-tag:v", "hvc1"  # Fix HEVC tagging for better Plex compatibility
+                "-c:v", "copy"
             ])
             
             # Audio codec and container-specific settings
@@ -425,13 +424,20 @@ class HLSStreamManager:
             
             
             # HLS output settings
+            hls_flags = "independent_segments+delete_segments+omit_endlist"
+            
+            # For MPEG-TS, add program_date_time for better Plex compatibility
+            if segment_type == "mpegts":
+                hls_flags += "+program_date_time"
+            
             ffmpeg_cmd.extend([
                 "-f", "hls",
                 "-hls_time", segment_duration,
                 "-hls_list_size", playlist_size,
-                "-hls_flags", "independent_segments+delete_segments+omit_endlist",
+                "-hls_flags", hls_flags,
                 "-hls_segment_type", segment_type,
                 "-hls_segment_filename", segment_pattern,
+                "-start_number", "0",  # Explicitly start from seg_000
             ])
             
             # Add init filename for fMP4
