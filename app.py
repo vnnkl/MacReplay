@@ -209,28 +209,33 @@ class HLSStreamManager:
         
         with self.lock:
             for stream_key, stream_info in self.streams.items():
+                is_passthrough = stream_info.get('is_passthrough', False)
+                
                 # Skip process checks for passthrough streams
-                if not stream_info.get('is_passthrough', False):
+                if not is_passthrough:
                     # Check if process has crashed
                     if stream_info['process'].poll() is not None:
                         returncode = stream_info['process'].returncode
                         if returncode != 0:
-                            logger.error(f"HLS stream {stream_key} crashed with code {returncode}")
+                            logger.error(f"✗ FFmpeg process crashed for {stream_key} (exit code: {returncode})")
                             # Try to get stderr output
                             try:
                                 stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
                                 if stderr_output:
                                     # Log last 1000 characters of error
-                                    logger.error(f"FFmpeg error output for {stream_key}:\n{stderr_output[-1000:]}")
+                                    logger.error(f"FFmpeg stderr for {stream_key}:\n{stderr_output[-1000:]}")
                             except Exception as e:
-                                logger.error(f"Could not read FFmpeg stderr: {e}")
+                                logger.debug(f"Could not read FFmpeg stderr: {e}")
+                        else:
+                            logger.info(f"FFmpeg process exited cleanly for {stream_key}")
                         streams_to_remove.append(stream_key)
                         continue
                 
                 # Check if stream is inactive
                 inactive_time = current_time - stream_info['last_accessed']
                 if inactive_time > self.inactive_timeout:
-                    logger.info(f"HLS stream {stream_key} inactive for {inactive_time:.1f}s, cleaning up")
+                    stream_type = "passthrough" if is_passthrough else "FFmpeg"
+                    logger.info(f"Cleaning up inactive {stream_type} stream {stream_key} (idle for {inactive_time:.1f}s)")
                     streams_to_remove.append(stream_key)
         
         # Clean up streams outside the lock to avoid blocking
@@ -241,24 +246,37 @@ class HLSStreamManager:
         """Stop a stream and clean up its resources."""
         with self.lock:
             if stream_key not in self.streams:
+                logger.debug(f"Attempted to stop non-existent stream: {stream_key}")
                 return
             
             stream_info = self.streams[stream_key]
+            is_passthrough = stream_info.get('is_passthrough', False)
+            stream_type = "passthrough" if is_passthrough else "FFmpeg"
+            
+            logger.debug(f"Stopping {stream_type} stream: {stream_key}")
             
             # Terminate FFmpeg process (skip for passthrough streams)
-            if not stream_info.get('is_passthrough', False):
+            if not is_passthrough:
                 try:
                     if stream_info['process'].poll() is None:
+                        logger.debug(f"Terminating FFmpeg process (PID: {stream_info['process'].pid})")
                         stream_info['process'].terminate()
                         stream_info['process'].wait(timeout=5)
+                        logger.debug(f"FFmpeg process terminated successfully")
                     else:
                         # Process already exited, log stderr if available
                         try:
                             stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
                             if stderr_output:
-                                logger.error(f"FFmpeg stderr for {stream_key}: {stderr_output[-500:]}")  # Last 500 chars
+                                logger.debug(f"FFmpeg stderr (last 500 chars): {stderr_output[-500:]}")
                         except:
                             pass
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"FFmpeg process did not terminate gracefully, killing it")
+                    try:
+                        stream_info['process'].kill()
+                    except:
+                        pass
                 except Exception as e:
                     logger.error(f"Error terminating FFmpeg for {stream_key}: {e}")
                     try:
@@ -269,14 +287,15 @@ class HLSStreamManager:
             # Clean up temp directory
             try:
                 if os.path.exists(stream_info['temp_dir']):
-                    shutil.rmtree(stream_info['temp_dir'], ignore_errors=True)
-                    logger.info(f"Cleaned up temp dir for {stream_key}")
+                    temp_dir = stream_info['temp_dir']
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    logger.debug(f"Removed temp directory: {temp_dir}")
             except Exception as e:
                 logger.error(f"Error cleaning up temp dir for {stream_key}: {e}")
             
             # Remove from active streams
             del self.streams[stream_key]
-            logger.info(f"HLS stream {stream_key} stopped and cleaned up")
+            logger.info(f"✓ {stream_type.capitalize()} stream {stream_key} stopped and cleaned up")
     
     def start_stream(self, portal_id, channel_id, stream_url, proxy=None):
         """Start or reuse an HLS stream for a channel."""
@@ -307,14 +326,23 @@ class HLSStreamManager:
                            "hls" in stream_url.lower() or 
                            "stitcher" in stream_url.lower())
             
+            # Log detection result
+            if is_source_hls:
+                logger.info(f"Detected HLS source for {stream_key}: URL contains HLS indicators")
+                logger.debug(f"Source URL: {stream_url[:100]}...")
+            else:
+                logger.info(f"Detected non-HLS source for {stream_key}, will use FFmpeg re-encoding")
+                logger.debug(f"Source URL: {stream_url[:100]}...")
+            
             # Create temp directory for HLS segments
             temp_dir = tempfile.mkdtemp(prefix=f"macreplay_hls_{stream_key}_")
             playlist_path = os.path.join(temp_dir, "stream.m3u8")
             master_playlist_path = os.path.join(temp_dir, "master.m3u8")
+            logger.debug(f"Created temp directory for {stream_key}: {temp_dir}")
             
             # If source is already HLS, create a proxy/passthrough instead of re-encoding
             if is_source_hls:
-                logger.info(f"Source is HLS, creating passthrough for {stream_key}")
+                logger.info(f"Creating HLS passthrough for {stream_key} (no FFmpeg process)")
                 
                 # Store stream info with passthrough flag
                 stream_info = {
@@ -337,7 +365,8 @@ class HLSStreamManager:
                     f.write(stream_url + "\n")
                 
                 self.streams[stream_key] = stream_info
-                logger.info(f"Created HLS passthrough for {stream_key}")
+                logger.info(f"✓ HLS passthrough ready for {stream_key} (redirects to source)")
+                logger.debug(f"Master playlist created at: {master_playlist_path}")
                 
                 return stream_info
             
@@ -400,7 +429,8 @@ class HLSStreamManager:
             # Start FFmpeg process
             try:
                 # Log the FFmpeg command for debugging
-                logger.info(f"Starting FFmpeg with command: {' '.join(ffmpeg_cmd)}")
+                logger.info(f"Starting FFmpeg process for {stream_key}")
+                logger.debug(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
                 
                 process = subprocess.Popen(
                     ffmpeg_cmd,
@@ -408,6 +438,8 @@ class HLSStreamManager:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE
                 )
+                
+                logger.debug(f"FFmpeg process started with PID: {process.pid}")
                 
                 # Create master playlist
                 with open(master_playlist_path, 'w') as f:
@@ -430,17 +462,20 @@ class HLSStreamManager:
                 }
                 
                 self.streams[stream_key] = stream_info
-                logger.info(f"Started HLS stream for {stream_key} in {temp_dir}")
+                logger.info(f"✓ FFmpeg HLS stream ready for {stream_key}")
+                logger.debug(f"Temp dir: {temp_dir}, PID: {process.pid}")
                 
                 return stream_info
                 
             except Exception as e:
-                logger.error(f"Error starting HLS stream for {stream_key}: {e}")
+                logger.error(f"✗ Failed to start HLS stream for {stream_key}: {e}")
+                logger.debug(f"Exception type: {type(e).__name__}")
                 # Clean up temp dir on failure
                 try:
                     shutil.rmtree(temp_dir, ignore_errors=True)
-                except:
-                    pass
+                    logger.debug(f"Cleaned up failed temp dir: {temp_dir}")
+                except Exception as cleanup_error:
+                    logger.debug(f"Could not clean up temp dir: {cleanup_error}")
                 raise
     
     def get_file(self, portal_id, channel_id, filename):
@@ -449,17 +484,29 @@ class HLSStreamManager:
         
         with self.lock:
             if stream_key not in self.streams:
+                logger.warning(f"File request for inactive stream: {stream_key}/{filename}")
                 return None
             
             stream_info = self.streams[stream_key]
             stream_info['last_accessed'] = time.time()
             
+            # Log file access
+            is_passthrough = stream_info.get('is_passthrough', False)
+            logger.debug(f"File request: {stream_key}/{filename} (passthrough={is_passthrough})")
+            
             # Determine file path
             file_path = os.path.join(stream_info['temp_dir'], filename)
             
             if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+                logger.debug(f"Serving file: {filename} ({file_size} bytes)")
                 return file_path
             else:
+                logger.warning(f"File not found: {filename} for {stream_key} (expected at {file_path})")
+                # Check if FFmpeg process is still running
+                if not is_passthrough and stream_info['process']:
+                    if stream_info['process'].poll() is not None:
+                        logger.error(f"FFmpeg process died for {stream_key} (exit code: {stream_info['process'].returncode})")
                 return None
     
     def cleanup_all(self):
@@ -2051,12 +2098,19 @@ def hls_stream(portalId, channelId, filename):
     stream_key = f"{portalId}_{channelId}"
     file_path = hls_manager.get_file(portalId, channelId, filename)
     
+    if file_path:
+        logger.debug(f"Stream already active, serving file: {filename}")
+    else:
+        logger.debug(f"Stream not active or file not ready, checking if we need to start stream")
+    
     # If file doesn't exist and this is a playlist request, start the stream
     if not file_path and (filename.endswith('.m3u8') or filename.endswith('.ts')):
         # Get the stream URL
+        logger.debug(f"Fetching stream URL for channel {channelId} from portal {portalName}")
         link = None
         for mac in macs:
             try:
+                logger.debug(f"Trying MAC: {mac}")
                 token = stb.getToken(url, mac, proxy)
                 if token:
                     stb.getProfile(url, mac, token, proxy)
@@ -2070,36 +2124,46 @@ def hls_stream(portalId, channelId, filename):
                                     link = stb.getLink(url, mac, token, cmd, proxy)
                                 else:
                                     link = cmd.split(" ")[1]
+                                logger.debug(f"Found stream URL for channel {channelId}")
                                 break
                     
                     if link:
                         break
             except Exception as e:
-                logger.error(f"Error getting stream URL for HLS: {e}")
+                logger.error(f"Error getting stream URL for HLS with MAC {mac}: {e}")
                 continue
         
         if not link:
-            logger.error(f"Could not get stream URL for Portal({portalId}):Channel({channelId})")
+            logger.error(f"✗ Could not get stream URL for Portal({portalId}):Channel({channelId}) - tried {len(macs)} MAC(s)")
             return make_response("Stream not available", 503)
         
         # Start the HLS stream
         try:
+            logger.debug(f"Calling start_stream for {stream_key}")
             stream_info = hls_manager.start_stream(portalId, channelId, link, proxy)
             
             # Wait a moment for the first segments to be created
             if filename.endswith('.m3u8'):
                 # For playlist requests, wait up to 5 seconds for the file
+                logger.debug(f"Waiting for playlist file: {filename}")
+                wait_count = 0
                 for _ in range(50):  # 50 * 0.1 = 5 seconds
                     file_path = hls_manager.get_file(portalId, channelId, filename)
                     if file_path:
+                        logger.debug(f"Playlist ready after {wait_count * 0.1:.1f}s")
                         break
+                    wait_count += 1
                     time.sleep(0.1)
+                
+                if not file_path:
+                    logger.warning(f"Playlist {filename} not ready after 5 seconds")
             else:
                 # For segment requests, get the file path
                 file_path = hls_manager.get_file(portalId, channelId, filename)
         
         except Exception as e:
-            logger.error(f"Error starting HLS stream: {e}")
+            logger.error(f"✗ Error starting HLS stream: {e}")
+            logger.debug(f"Exception details: {type(e).__name__}: {str(e)}")
             return make_response("Error starting stream", 500)
     
     # Serve the file
@@ -2109,15 +2173,19 @@ def hls_stream(portalId, channelId, filename):
                 mimetype = 'application/vnd.apple.mpegurl'
             elif filename.endswith('.ts'):
                 mimetype = 'video/mp2t'
+            elif filename.endswith('.m4s') or filename.endswith('.mp4'):
+                mimetype = 'video/mp4'
             else:
                 mimetype = 'application/octet-stream'
             
+            file_size = os.path.getsize(file_path)
+            logger.debug(f"Serving {filename} ({file_size} bytes, {mimetype})")
             return send_file(file_path, mimetype=mimetype)
         except Exception as e:
-            logger.error(f"Error serving HLS file {filename}: {e}")
+            logger.error(f"✗ Error serving HLS file {filename}: {e}")
             return make_response("Error serving file", 500)
     else:
-        logger.warning(f"HLS file not found: {filename} for {stream_key}")
+        logger.warning(f"✗ HLS file not found: {filename} for {stream_key}")
         return make_response("File not found", 404)
 
 
