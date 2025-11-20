@@ -399,7 +399,8 @@ class HLSStreamManager:
             # Input and output settings
             ffmpeg_cmd.extend([
                 "-i", stream_url,
-                "-c:v", "copy"
+                "-c:v", "copy",
+                "-bsf:v", "hevc_mp4toannexb"  # Convert HEVC to Annex B for MPEG-TS (no-op for H.264)
             ])
             
             # Audio codec and container-specific settings
