@@ -398,48 +398,37 @@ class HLSStreamManager:
             # Add timeout
             ffmpeg_cmd.extend(["-timeout", str(timeout)])
             
-            # Input and output settings
+            # Input and basic video settings
             ffmpeg_cmd.extend([
                 "-i", stream_url,
                 "-map", "0",                   # Map all streams
-                "-c:v", "copy",
-                "-bsf:v", "hevc_mp4toannexb",  # Convert HEVC to Annex B for MPEG-TS (no-op for H.264)
+                "-c:v", "copy",                # Always copy video (never transcode)
                 "-copyts",                     # Copy timestamps
                 "-start_at_zero"               # Start at zero timestamp
             ])
             
-            # Audio codec and container-specific settings
-            if segment_type == "fmp4":
-                # fMP4 requires AAC audio - transcode if needed
-                # Many IPTV streams use MP2/AC3 audio which doesn't work in fMP4
-                ffmpeg_cmd.extend([
-                    "-c:a", "aac",                    # Transcode audio to AAC
-                    "-b:a", "256k",                   # Audio bitrate
-                    "-ac", "2",                       # Stereo audio
-                    "-af", "aresample=async=1"        # Audio resampling for sync
-                ])
-                logger.debug(f"Using fMP4 with AAC audio transcoding")
-            else:
-                # MPEG-TS: Use working settings from previous command
-                # Transcode audio for better compatibility (based on working command)
-                ffmpeg_cmd.extend([
-                    "-c:a", "aac",                    # Transcode audio to AAC
-                    "-b:a", "256k",                   # Audio bitrate
-                    "-af", "aresample=async=1"        # Audio resampling for sync
-                ])
-                logger.debug(f"Using MPEG-TS with AAC audio transcoding (256k)")
+            # Audio codec settings - always transcode for compatibility
+            # (Based on working command that used AAC transcoding)
+            ffmpeg_cmd.extend([
+                "-c:a", "aac",                 # Transcode audio to AAC
+                "-b:a", "256k",                # Audio bitrate
+                "-af", "aresample=async=1"     # Audio resampling for sync
+            ])
+            logger.debug(f"Using AAC audio transcoding at 256k with async resampling")
             
             
-            # HLS output settings
+            # HLS output settings with conditional flags
             hls_flags = "independent_segments+delete_segments+omit_endlist"
             
-            # For MPEG-TS, add program_date_time and MPEG-TS specific flags
+            # Add format-specific flags only when needed
             if segment_type == "mpegts":
                 hls_flags += "+program_date_time"
+                # MPEG-TS specific flags (from working command)
                 ffmpeg_cmd.extend([
-                    "-mpegts_flags", "pat_pmt_at_frames",  # MPEG-TS flags from working command
-                    "-pcr_period", "20"                     # PCR period
+                    "-mpegts_flags", "pat_pmt_at_frames",
+                    "-pcr_period", "20"
                 ])
+                logger.debug(f"Added MPEG-TS specific flags: pat_pmt_at_frames, pcr_period 20")
             
             ffmpeg_cmd.extend([
                 "-f", "hls",
@@ -448,8 +437,8 @@ class HLSStreamManager:
                 "-hls_flags", hls_flags,
                 "-hls_segment_type", segment_type,
                 "-hls_segment_filename", segment_pattern,
-                "-start_number", "0",  # Explicitly start from seg_000
-                "-flush_packets", "0"   # From working command
+                "-start_number", "0",
+                "-flush_packets", "0"
             ])
             
             # Add init filename for fMP4

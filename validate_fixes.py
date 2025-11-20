@@ -30,6 +30,9 @@ def validate_no_hardcoded_codec_tags():
     if '"-tag:v", "avc1"' in source:
         errors.append("Found hardcoded H.264 tag (-tag:v avc1) - should not force codec tags!")
     
+    if '"-bsf:v", "hevc_mp4toannexb"' in source:
+        errors.append("Found HEVC bitstream filter applied globally - this breaks H.264 streams!")
+    
     return errors
 
 
@@ -38,32 +41,30 @@ def validate_timestamp_flags():
     
     errors = []
     
-    if '"-avoid_negative_ts"' not in source:
-        errors.append("Missing timestamp correction flag: -avoid_negative_ts")
+    # We use -copyts and -start_at_zero (from working command)
+    if '"-copyts"' not in source:
+        errors.append("Missing timestamp flag: -copyts")
     
-    if '"make_zero"' not in source:
-        errors.append("Missing timestamp correction value: make_zero")
-    
-    if '"-mpegts_copyts"' not in source:
-        errors.append("Missing MPEG-TS timestamp flag: -mpegts_copyts")
+    if '"-start_at_zero"' not in source:
+        errors.append("Missing timestamp flag: -start_at_zero")
     
     return errors
 
 
-def validate_audio_codec_conditional():
-    """Verify audio codec is conditional on segment type."""
+def validate_audio_codec_configured():
+    """Verify audio codec is properly configured."""
     
     errors = []
     
-    if '"-c:a", "copy"' not in source:
-        errors.append("Missing audio copy codec (needed for MPEG-TS)")
-    
+    # We now always transcode audio to AAC for compatibility (based on working command)
     if '"-c:a", "aac"' not in source:
-        errors.append("Missing AAC audio codec (needed for fMP4)")
+        errors.append("Missing AAC audio codec")
     
-    # Check for conditional logic
-    if 'if segment_type' not in source:
-        errors.append("Audio codec doesn't appear to be conditional on segment type")
+    if '"-b:a", "256k"' not in source:
+        errors.append("Missing audio bitrate specification")
+    
+    if '"aresample=async=1"' not in source:
+        errors.append("Missing audio async resampling (needed for sync)")
     
     return errors
 
@@ -187,8 +188,8 @@ def main():
     
     validations = [
         ("Codec Tag Validation", validate_no_hardcoded_codec_tags),
-        ("Timestamp Correction Flags", validate_timestamp_flags),
-        ("Audio Codec Conditional Logic", validate_audio_codec_conditional),
+        ("Timestamp Flags", validate_timestamp_flags),
+        ("Audio Codec Configuration", validate_audio_codec_configured),
         ("Default Segment Type", validate_default_segment_type),
         ("Video Copy Only (No Transcoding)", validate_video_copy_only),
         ("HLS Flags Configuration", validate_hls_flags),
@@ -224,3 +225,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

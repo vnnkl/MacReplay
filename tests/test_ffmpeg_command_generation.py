@@ -513,6 +513,113 @@ class TestCodecTagValidation:
         
         # If we ever need to add codec tags in the future, they must be conditional
         # based on actual codec detection, not applied to all streams
+    
+    def test_no_codec_specific_bitstream_filters_applied_globally(self):
+        """Verify codec-specific bitstream filters are not applied to all streams.
+        
+        The hevc_mp4toannexb filter only works with HEVC and crashes on H.264.
+        It should never be applied unconditionally.
+        """
+        import app
+        import inspect
+        
+        source = inspect.getsource(app.HLSStreamManager.start_stream)
+        
+        # Check for unconditional bitstream filter
+        assert '"-bsf:v", "hevc_mp4toannexb"' not in source, \
+            "Found HEVC bitstream filter applied to all streams - this breaks H.264!"
+        
+        # If we need bitstream filters in the future, they must be conditional
+        # Example: if codec == "hevc": ffmpeg_cmd.extend(["-bsf:v", "hevc_mp4toannexb"])
+
+
+class TestConditionalFlags:
+    """Test that format-specific flags are only applied when needed."""
+    
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.manager = HLSStreamManager(max_streams=5, inactive_timeout=2)
+    
+    def teardown_method(self):
+        """Clean up after tests."""
+        self.manager.running = False
+        self.manager.cleanup_all()
+    
+    @patch('app.subprocess.Popen')
+    @patch('app.tempfile.mkdtemp')
+    @patch('app.getSettings')
+    @patch('builtins.open', create=True)
+    def test_mpegts_specific_flags_only_for_mpegts(self, mock_open, mock_get_settings, 
+                                                   mock_mkdtemp, mock_popen):
+        """Test that MPEG-TS specific flags are NOT added for fMP4."""
+        mock_get_settings.return_value = {
+            "ffmpeg timeout": "5",
+            "hls segment type": "fmp4",  # Using fMP4
+            "hls segment duration": "4",
+            "hls playlist size": "6"
+        }
+        
+        mock_mkdtemp.return_value = "/tmp/test_hls"
+        mock_process = Mock()
+        mock_process.poll.return_value = None
+        mock_popen.return_value = mock_process
+        
+        # Start stream
+        self.manager.start_stream(
+            portal_id="portal1",
+            channel_id="123",
+            stream_url="http://example.com/stream.ts"
+        )
+        
+        # Get FFmpeg command
+        ffmpeg_cmd = mock_popen.call_args[0][0]
+        ffmpeg_cmd_str = " ".join(ffmpeg_cmd)
+        
+        # Verify MPEG-TS specific flags are NOT present for fMP4
+        assert "-mpegts_flags" not in ffmpeg_cmd_str, \
+            "MPEG-TS flags should not be added for fMP4"
+        assert "-pcr_period" not in ffmpeg_cmd_str, \
+            "PCR period should not be added for fMP4"
+        assert "program_date_time" not in ffmpeg_cmd_str, \
+            "program_date_time should not be added for fMP4"
+    
+    @patch('app.subprocess.Popen')
+    @patch('app.tempfile.mkdtemp')
+    @patch('app.getSettings')
+    @patch('builtins.open', create=True)
+    def test_mpegts_flags_present_for_mpegts(self, mock_open, mock_get_settings,
+                                            mock_mkdtemp, mock_popen):
+        """Test that MPEG-TS specific flags ARE added for MPEG-TS."""
+        mock_get_settings.return_value = {
+            "ffmpeg timeout": "5",
+            "hls segment type": "mpegts",  # Using MPEG-TS
+            "hls segment duration": "4",
+            "hls playlist size": "6"
+        }
+        
+        mock_mkdtemp.return_value = "/tmp/test_hls"
+        mock_process = Mock()
+        mock_process.poll.return_value = None
+        mock_popen.return_value = mock_process
+        
+        # Start stream
+        self.manager.start_stream(
+            portal_id="portal1",
+            channel_id="123",
+            stream_url="http://example.com/stream.ts"
+        )
+        
+        # Get FFmpeg command
+        ffmpeg_cmd = mock_popen.call_args[0][0]
+        ffmpeg_cmd_str = " ".join(ffmpeg_cmd)
+        
+        # Verify MPEG-TS specific flags ARE present
+        assert "-mpegts_flags pat_pmt_at_frames" in ffmpeg_cmd_str, \
+            "MPEG-TS flags should be added for MPEG-TS"
+        assert "-pcr_period 20" in ffmpeg_cmd_str, \
+            "PCR period should be added for MPEG-TS"
+        assert "program_date_time" in ffmpeg_cmd_str, \
+            "program_date_time should be added for MPEG-TS"
 
 
 class TestHLSPassthrough:
@@ -559,3 +666,4 @@ class TestHLSPassthrough:
         
         # Verify FFmpeg was NOT called (passthrough doesn't use FFmpeg)
         assert not mock_popen.called
+
