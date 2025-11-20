@@ -137,7 +137,7 @@ defaultSettings = {
     "stream method": "ffmpeg",
     "output format": "mpegts",
     "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -strict experimental -analyzeduration 0 -probesize 32 -copyts -threads 12 pipe:",
-    "hls segment type": "fmp4",
+    "hls segment type": "mpegts",
     "hls segment duration": "4",
     "hls playlist size": "6",
     "ffmpeg timeout": "5",
@@ -397,12 +397,24 @@ class HLSStreamManager:
             ffmpeg_cmd.extend(["-timeout", str(timeout)])
             
             # Input and output settings
-            ffmpeg_cmd.extend([
-                "-i", stream_url,
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-ac", "2",
-            ])
+            ffmpeg_cmd.extend(["-i", stream_url, "-c:v", "copy"])
+            
+            # Audio codec depends on segment type
+            if segment_type == "fmp4":
+                # fMP4 requires AAC audio - transcode if needed
+                # Many IPTV streams use MP2/AC3 audio which doesn't work in fMP4
+                ffmpeg_cmd.extend([
+                    "-c:a", "aac",       # Transcode audio to AAC
+                    "-ac", "2",          # Stereo audio
+                ])
+                logger.debug(f"Using fMP4 with AAC audio transcoding")
+            else:
+                # MPEG-TS can use any audio codec - just copy it
+                # This is faster, uses less CPU, and works with any FFmpeg build
+                ffmpeg_cmd.extend([
+                    "-c:a", "copy",      # Copy audio as-is (no transcoding)
+                ])
+                logger.debug(f"Using MPEG-TS with audio copy (no transcoding)")
             
             
             # HLS output settings
