@@ -379,10 +379,12 @@ class HLSStreamManager:
                 init_filename = None
             
             # Build FFmpeg command for HLS
+            # Based on working mpegts command, adapted for HLS
             ffmpeg_cmd = [
                 "ffmpeg",
-                "-fflags", "+genpts+igndts",
+                "-fflags", "+genpts+igndts+nobuffer",
                 "-err_detect", "aggressive",
+                "-flags", "low_delay",
                 "-reconnect", "1",
                 "-reconnect_at_eof", "1",
                 "-reconnect_streamed", "1",
@@ -399,8 +401,11 @@ class HLSStreamManager:
             # Input and output settings
             ffmpeg_cmd.extend([
                 "-i", stream_url,
+                "-map", "0",                   # Map all streams
                 "-c:v", "copy",
-                "-bsf:v", "hevc_mp4toannexb"  # Convert HEVC to Annex B for MPEG-TS (no-op for H.264)
+                "-bsf:v", "hevc_mp4toannexb",  # Convert HEVC to Annex B for MPEG-TS (no-op for H.264)
+                "-copyts",                     # Copy timestamps
+                "-start_at_zero"               # Start at zero timestamp
             ])
             
             # Audio codec and container-specific settings
@@ -409,27 +414,32 @@ class HLSStreamManager:
                 # Many IPTV streams use MP2/AC3 audio which doesn't work in fMP4
                 ffmpeg_cmd.extend([
                     "-c:a", "aac",                    # Transcode audio to AAC
+                    "-b:a", "256k",                   # Audio bitrate
                     "-ac", "2",                       # Stereo audio
-                    "-avoid_negative_ts", "make_zero" # Fix timestamp issues for Plex
+                    "-af", "aresample=async=1"        # Audio resampling for sync
                 ])
                 logger.debug(f"Using fMP4 with AAC audio transcoding")
             else:
-                # MPEG-TS can use any audio codec - just copy it
-                # This is faster, uses less CPU, and works with any FFmpeg build
+                # MPEG-TS: Use working settings from previous command
+                # Transcode audio for better compatibility (based on working command)
                 ffmpeg_cmd.extend([
-                    "-c:a", "copy",                   # Copy audio as-is (no transcoding)
-                    "-avoid_negative_ts", "make_zero", # Fix timestamp issues for Plex
-                    "-mpegts_copyts", "1"             # Preserve original timestamps
+                    "-c:a", "aac",                    # Transcode audio to AAC
+                    "-b:a", "256k",                   # Audio bitrate
+                    "-af", "aresample=async=1"        # Audio resampling for sync
                 ])
-                logger.debug(f"Using MPEG-TS with audio copy (no transcoding)")
+                logger.debug(f"Using MPEG-TS with AAC audio transcoding (256k)")
             
             
             # HLS output settings
             hls_flags = "independent_segments+delete_segments+omit_endlist"
             
-            # For MPEG-TS, add program_date_time for better Plex compatibility
+            # For MPEG-TS, add program_date_time and MPEG-TS specific flags
             if segment_type == "mpegts":
                 hls_flags += "+program_date_time"
+                ffmpeg_cmd.extend([
+                    "-mpegts_flags", "pat_pmt_at_frames",  # MPEG-TS flags from working command
+                    "-pcr_period", "20"                     # PCR period
+                ])
             
             ffmpeg_cmd.extend([
                 "-f", "hls",
@@ -439,6 +449,7 @@ class HLSStreamManager:
                 "-hls_segment_type", segment_type,
                 "-hls_segment_filename", segment_pattern,
                 "-start_number", "0",  # Explicitly start from seg_000
+                "-flush_packets", "0"   # From working command
             ])
             
             # Add init filename for fMP4
