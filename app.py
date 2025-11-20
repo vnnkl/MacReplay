@@ -334,6 +334,14 @@ class HLSStreamManager:
             ffmpeg_cmd.extend([
                 "-i", stream_url,
                 "-c", "copy",
+            ])
+            
+            # Add bitstream filter for fMP4 (fixes AAC audio issues)
+            if segment_type == "fmp4":
+                ffmpeg_cmd.extend(["-bsf:a", "aac_adtstoasc"])
+            
+            # HLS output settings
+            ffmpeg_cmd.extend([
                 "-f", "hls",
                 "-hls_time", segment_duration,
                 "-hls_list_size", playlist_size,
