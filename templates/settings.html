@@ -27,6 +27,17 @@
                     </div>
                     
                     <div class="mb-3">
+                        <label for="output_format" class="form-label">Output Format</label>
+                        <select class="form-select" id="output_format" name="output format">
+                            <option value="mpegts" {{ 'selected' if settings['output format'] == 'mpegts' }}>MPEG-TS (pipe) - Current behavior</option>
+                            <option value="hls" {{ 'selected' if settings['output format'] == 'hls' }}>HLS (segmented) - Instant start on Plex/Apple TV</option>
+                        </select>
+                        <div class="form-text">
+                            HLS is recommended for Plex/Apple TV (faster start, consumes disk space for segments).
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
                         <label for="ffmpeg_command" class="form-label">FFmpeg Command</label>
                         <textarea class="form-control" id="ffmpeg_command" name="ffmpeg command" rows="3">{{ settings['ffmpeg command'] }}</textarea>
                         <div class="form-text">

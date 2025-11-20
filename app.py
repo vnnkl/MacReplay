@@ -55,12 +55,15 @@ from flask import (
     Response,
     make_response,
     flash,
+    send_file,
 )
 from datetime import datetime, timezone
 from functools import wraps
 import secrets
 import waitress
 import sqlite3
+import tempfile
+import atexit
 
 app = Flask(__name__)
 app.secret_key = secrets.token_urlsafe(32)
@@ -132,6 +135,7 @@ d_ffmpegcmd = [
 
 defaultSettings = {
     "stream method": "ffmpeg",
+    "output format": "mpegts",
     "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -strict experimental -analyzeduration 0 -probesize 32 -copyts -threads 12 pipe:",
     "ffmpeg timeout": "5",
     "test streams": "true",
@@ -165,6 +169,224 @@ defaultPortal = {
     "custom epg ids": {},
     "fallback channels": {},
 }
+
+
+class HLSStreamManager:
+    """Manages HLS streams with shared access and automatic cleanup."""
+    
+    def __init__(self, max_streams=10, inactive_timeout=30):
+        self.streams = {}  # Key: "portalId_channelId", Value: stream info dict
+        self.max_streams = max_streams
+        self.inactive_timeout = inactive_timeout
+        self.lock = threading.Lock()
+        self.monitor_thread = None
+        self.running = False
+        
+    def start_monitoring(self):
+        """Start the background monitoring thread."""
+        if not self.running:
+            self.running = True
+            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self.monitor_thread.start()
+            logger.info("HLS Stream Manager monitoring started")
+    
+    def _monitor_loop(self):
+        """Background thread that monitors and cleans up inactive streams."""
+        while self.running:
+            try:
+                time.sleep(10)  # Check every 10 seconds
+                self._cleanup_inactive_streams()
+            except Exception as e:
+                logger.error(f"Error in HLS monitor loop: {e}")
+    
+    def _cleanup_inactive_streams(self):
+        """Clean up streams that have been inactive or crashed."""
+        current_time = time.time()
+        streams_to_remove = []
+        
+        with self.lock:
+            for stream_key, stream_info in self.streams.items():
+                # Check if process has crashed
+                if stream_info['process'].poll() is not None:
+                    returncode = stream_info['process'].returncode
+                    if returncode != 0:
+                        logger.error(f"HLS stream {stream_key} crashed with code {returncode}")
+                    streams_to_remove.append(stream_key)
+                    continue
+                
+                # Check if stream is inactive
+                inactive_time = current_time - stream_info['last_accessed']
+                if inactive_time > self.inactive_timeout:
+                    logger.info(f"HLS stream {stream_key} inactive for {inactive_time:.1f}s, cleaning up")
+                    streams_to_remove.append(stream_key)
+        
+        # Clean up streams outside the lock to avoid blocking
+        for stream_key in streams_to_remove:
+            self._stop_stream(stream_key)
+    
+    def _stop_stream(self, stream_key):
+        """Stop a stream and clean up its resources."""
+        with self.lock:
+            if stream_key not in self.streams:
+                return
+            
+            stream_info = self.streams[stream_key]
+            
+            # Terminate FFmpeg process
+            try:
+                if stream_info['process'].poll() is None:
+                    stream_info['process'].terminate()
+                    stream_info['process'].wait(timeout=5)
+            except Exception as e:
+                logger.error(f"Error terminating FFmpeg for {stream_key}: {e}")
+                try:
+                    stream_info['process'].kill()
+                except:
+                    pass
+            
+            # Clean up temp directory
+            try:
+                if os.path.exists(stream_info['temp_dir']):
+                    shutil.rmtree(stream_info['temp_dir'], ignore_errors=True)
+                    logger.info(f"Cleaned up temp dir for {stream_key}")
+            except Exception as e:
+                logger.error(f"Error cleaning up temp dir for {stream_key}: {e}")
+            
+            # Remove from active streams
+            del self.streams[stream_key]
+            logger.info(f"HLS stream {stream_key} stopped and cleaned up")
+    
+    def start_stream(self, portal_id, channel_id, stream_url, proxy=None):
+        """Start or reuse an HLS stream for a channel."""
+        stream_key = f"{portal_id}_{channel_id}"
+        
+        with self.lock:
+            # Check if stream already exists
+            if stream_key in self.streams:
+                # Update last accessed time
+                self.streams[stream_key]['last_accessed'] = time.time()
+                logger.info(f"Reusing existing HLS stream for {stream_key}")
+                return self.streams[stream_key]
+            
+            # Check concurrency limit
+            if len(self.streams) >= self.max_streams:
+                logger.error(f"Max concurrent streams ({self.max_streams}) reached")
+                raise Exception(f"Maximum concurrent streams ({self.max_streams}) reached")
+            
+            # Create temp directory for HLS segments
+            temp_dir = tempfile.mkdtemp(prefix=f"macreplay_hls_{stream_key}_")
+            playlist_path = os.path.join(temp_dir, "stream.m3u8")
+            master_playlist_path = os.path.join(temp_dir, "master.m3u8")
+            segment_pattern = os.path.join(temp_dir, "seg_%03d.ts")
+            
+            # Build FFmpeg command for HLS
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-fflags", "+genpts+igndts",
+                "-err_detect", "aggressive",
+                "-reconnect", "1",
+                "-reconnect_at_eof", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "15",
+            ]
+            
+            # Add proxy if provided
+            if proxy:
+                ffmpeg_cmd.extend(["-http_proxy", proxy])
+            
+            # Add timeout
+            timeout = int(getSettings().get("ffmpeg timeout", "5")) * 1000000
+            ffmpeg_cmd.extend(["-timeout", str(timeout)])
+            
+            # Input and output settings
+            ffmpeg_cmd.extend([
+                "-i", stream_url,
+                "-c", "copy",
+                "-f", "hls",
+                "-hls_time", "4",
+                "-hls_list_size", "6",
+                "-hls_flags", "independent_segments+delete_segments+omit_endlist",
+                "-hls_segment_type", "mpegts",
+                "-hls_segment_filename", segment_pattern,
+                "-master_pl_name", "master.m3u8",
+                playlist_path
+            ])
+            
+            # Start FFmpeg process
+            try:
+                process = subprocess.Popen(
+                    ffmpeg_cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE
+                )
+                
+                # Create master playlist
+                with open(master_playlist_path, 'w') as f:
+                    f.write("#EXTM3U\n")
+                    f.write("#EXT-X-VERSION:7\n")
+                    f.write('#EXT-X-STREAM-INF:BANDWIDTH=15000000,CODECS="avc1.640028,mp4a.40.2"\n')
+                    f.write("stream.m3u8\n")
+                
+                # Store stream info
+                stream_info = {
+                    'process': process,
+                    'temp_dir': temp_dir,
+                    'playlist_path': playlist_path,
+                    'master_playlist_path': master_playlist_path,
+                    'last_accessed': time.time(),
+                    'portal_id': portal_id,
+                    'channel_id': channel_id,
+                    'stream_url': stream_url
+                }
+                
+                self.streams[stream_key] = stream_info
+                logger.info(f"Started HLS stream for {stream_key} in {temp_dir}")
+                
+                return stream_info
+                
+            except Exception as e:
+                logger.error(f"Error starting HLS stream for {stream_key}: {e}")
+                # Clean up temp dir on failure
+                try:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except:
+                    pass
+                raise
+    
+    def get_file(self, portal_id, channel_id, filename):
+        """Get a file from the HLS stream (playlist or segment)."""
+        stream_key = f"{portal_id}_{channel_id}"
+        
+        with self.lock:
+            if stream_key not in self.streams:
+                return None
+            
+            stream_info = self.streams[stream_key]
+            stream_info['last_accessed'] = time.time()
+            
+            # Determine file path
+            file_path = os.path.join(stream_info['temp_dir'], filename)
+            
+            if os.path.exists(file_path):
+                return file_path
+            else:
+                return None
+    
+    def cleanup_all(self):
+        """Clean up all active streams (called on shutdown)."""
+        logger.info("Cleaning up all HLS streams...")
+        self.running = False
+        
+        stream_keys = list(self.streams.keys())
+        for stream_key in stream_keys:
+            self._stop_stream(stream_key)
+        
+        logger.info("All HLS streams cleaned up")
+
+
+# Global HLS stream manager
+hls_manager = HLSStreamManager(max_streams=10, inactive_timeout=30)
 
 
 def loadConfig():
@@ -412,16 +634,18 @@ def moveMac(portalId, mac):
     savePortals(portals)
 
 
-@app.route("/", methods=["GET"])
-@authorise
-def home():
-    return redirect("/portals", code=302)
-
-
-@app.route("/portals", methods=["GET"])
+@app.route("/api/portals", methods=["GET"])
 @authorise
 def portals():
+    """Legacy template route"""
     return render_template("portals.html", portals=getPortals())
+
+
+@app.route("/api/portals/data", methods=["GET"])
+@authorise
+def portals_data():
+    """API endpoint to get portals data"""
+    return jsonify(getPortals())
 
 
 @app.route("/portal/add", methods=["POST"])
@@ -588,22 +812,39 @@ def portalUpdate():
 def portalRemove():
     id = request.form["deleteId"]
     portals = getPortals()
+    
+    # Check if portal exists
+    if id not in portals:
+        logger.error(f"Attempted to delete non-existent portal: {id}")
+        # For API calls, return JSON error
+        if request.headers.get('Content-Type') == 'application/x-www-form-urlencoded':
+            return jsonify({"error": "Portal not found"}), 404
+        flash(f"Portal not found", "danger")
+        return redirect("/portals", code=302)
+    
     name = portals[id]["name"]
     del portals[id]
     savePortals(portals)
     logger.info("Portal ({}) removed!".format(name))
+    
+    # For API calls, return JSON
+    if request.content_type == 'application/x-www-form-urlencoded' or 'application/json' in request.headers.get('Accept', ''):
+        return jsonify({"success": True, "message": f"Portal {name} removed"})
+    
     flash("Portal ({}) removed!".format(name), "success")
     return redirect("/portals", code=302)
 
 
-@app.route("/editor", methods=["GET"])
+@app.route("/api/editor", methods=["GET"])
 @authorise
 def editor():
+    """Legacy template route"""
     return render_template("editor.html")
     
 
 
-@app.route("/editor_data", methods=["GET"])
+@app.route("/api/editor_data", methods=["GET"])
+@app.route("/editor_data", methods=["GET"])  # Keep old route for backward compatibility
 @authorise
 def editor_data():
     """Server-side DataTables endpoint with pagination and filtering."""
@@ -798,7 +1039,8 @@ def editor_data():
         }), 500
 
 
-@app.route("/editor/portals", methods=["GET"])
+@app.route("/api/editor/portals", methods=["GET"])
+@app.route("/editor/portals", methods=["GET"])  # Keep old route for backward compatibility
 @authorise
 def editor_portals():
     """Get list of unique portals for filter dropdown."""
@@ -822,7 +1064,8 @@ def editor_portals():
         return flask.jsonify({"portals": [], "error": str(e)}), 500
 
 
-@app.route("/editor/genres", methods=["GET"])
+@app.route("/api/editor/genres", methods=["GET"])
+@app.route("/editor/genres", methods=["GET"])  # Keep old route for backward compatibility
 @authorise
 def editor_genres():
     """Get list of unique genres for filter dropdown."""
@@ -848,7 +1091,8 @@ def editor_genres():
         return flask.jsonify({"genres": [], "error": str(e)}), 500
 
 
-@app.route("/editor/duplicate-counts", methods=["GET"])
+@app.route("/api/editor/duplicate-counts", methods=["GET"])
+@app.route("/editor/duplicate-counts", methods=["GET"])  # Keep old route for backward compatibility
 @authorise
 def editor_duplicate_counts():
     """Get duplicate counts for all channel names (only enabled channels)."""
@@ -876,7 +1120,8 @@ def editor_duplicate_counts():
         return flask.jsonify({"counts": [], "error": str(e)}), 500
 
 
-@app.route("/editor/deactivate-duplicates", methods=["POST"])
+@app.route("/api/editor/deactivate-duplicates", methods=["POST"])
+@app.route("/editor/deactivate-duplicates", methods=["POST"])  # Keep old route for backward compatibility
 @authorise
 def editor_deactivate_duplicates():
     """Deactivate duplicate enabled channels, keeping only the first occurrence."""
@@ -947,7 +1192,8 @@ def editor_deactivate_duplicates():
         }), 500
 
 
-@app.route("/editor/save", methods=["POST"])
+@app.route("/api/editor/save", methods=["POST"])
+@app.route("/editor/save", methods=["POST"])  # Keep old route for backward compatibility
 @authorise
 def editorSave():
     global cached_xmltv, last_playlist_host
@@ -1055,7 +1301,8 @@ def editorSave():
     return redirect("/editor", code=302)
 
 
-@app.route("/editor/reset", methods=["POST"])
+@app.route("/api/editor/reset", methods=["POST"])
+@app.route("/editor/reset", methods=["POST"])  # Keep old route for backward compatibility
 @authorise
 def editorReset():
     """Reset all channel customizations in the database."""
@@ -1087,7 +1334,8 @@ def editorReset():
     return redirect("/editor", code=302)
 
 
-@app.route("/editor/refresh", methods=["POST"])
+@app.route("/api/editor/refresh", methods=["POST"])
+@app.route("/editor/refresh", methods=["POST"])  # Keep old route for backward compatibility
 @authorise
 def editorRefresh():
     """Manually trigger a refresh of the channel cache."""
@@ -1100,13 +1348,21 @@ def editorRefresh():
         return flask.jsonify({"status": "error", "message": str(e)}), 500
 
 
-@app.route("/settings", methods=["GET"])
+@app.route("/api/settings", methods=["GET"])
 @authorise
 def settings():
+    """Legacy template route"""
     settings = getSettings()
     return render_template(
         "settings.html", settings=settings, defaultSettings=defaultSettings
     )
+
+
+@app.route("/api/settings/data", methods=["GET"])
+@authorise
+def settings_data():
+    """API endpoint to get settings"""
+    return jsonify(getSettings())
 
 
 @app.route("/settings/save", methods=["POST"])
@@ -1201,7 +1457,12 @@ def generate_playlist():
             channel_entry += '" group-title="' + str(genre)
         
         channel_entry += '",' + channel_name + "\n"
-        channel_entry += f"http://{playlist_host}/play/{portal}/{channel_id}"
+        
+        # Use HLS URL if output format is set to HLS, otherwise use MPEG-TS
+        if getSettings().get("output format", "mpegts") == "hls":
+            channel_entry += f"http://{playlist_host}/hls/{portal}/{channel_id}/master.m3u8"
+        else:
+            channel_entry += f"http://{playlist_host}/play/{portal}/{channel_id}"
         
         channels.append(channel_entry)
     
@@ -1679,9 +1940,102 @@ def channel(portalId, channelId):
     return make_response("No streams available", 503)
 
 
-@app.route("/dashboard")
+@app.route("/hls/<portalId>/<channelId>/<path:filename>", methods=["GET"])
+def hls_stream(portalId, channelId, filename):
+    """Serve HLS streams (playlists and segments)."""
+    
+    # Get portal info
+    portal = getPortals().get(portalId)
+    if not portal:
+        logger.error(f"Portal {portalId} not found for HLS request")
+        return make_response("Portal not found", 404)
+    
+    portalName = portal.get("name")
+    url = portal.get("url")
+    macs = list(portal["macs"].keys())
+    proxy = portal.get("proxy")
+    ip = request.remote_addr
+    
+    logger.info(f"HLS request from IP({ip}) for Portal({portalId}):Channel({channelId}):File({filename})")
+    
+    # Check if we already have this stream
+    stream_key = f"{portalId}_{channelId}"
+    file_path = hls_manager.get_file(portalId, channelId, filename)
+    
+    # If file doesn't exist and this is a playlist request, start the stream
+    if not file_path and (filename.endswith('.m3u8') or filename.endswith('.ts')):
+        # Get the stream URL
+        link = None
+        for mac in macs:
+            try:
+                token = stb.getToken(url, mac, proxy)
+                if token:
+                    stb.getProfile(url, mac, token, proxy)
+                    channels = stb.getAllChannels(url, mac, token, proxy)
+                    
+                    if channels:
+                        for c in channels:
+                            if str(c["id"]) == channelId:
+                                cmd = c["cmd"]
+                                if "http://localhost/" in cmd:
+                                    link = stb.getLink(url, mac, token, cmd, proxy)
+                                else:
+                                    link = cmd.split(" ")[1]
+                                break
+                    
+                    if link:
+                        break
+            except Exception as e:
+                logger.error(f"Error getting stream URL for HLS: {e}")
+                continue
+        
+        if not link:
+            logger.error(f"Could not get stream URL for Portal({portalId}):Channel({channelId})")
+            return make_response("Stream not available", 503)
+        
+        # Start the HLS stream
+        try:
+            stream_info = hls_manager.start_stream(portalId, channelId, link, proxy)
+            
+            # Wait a moment for the first segments to be created
+            if filename.endswith('.m3u8'):
+                # For playlist requests, wait up to 5 seconds for the file
+                for _ in range(50):  # 50 * 0.1 = 5 seconds
+                    file_path = hls_manager.get_file(portalId, channelId, filename)
+                    if file_path:
+                        break
+                    time.sleep(0.1)
+            else:
+                # For segment requests, get the file path
+                file_path = hls_manager.get_file(portalId, channelId, filename)
+        
+        except Exception as e:
+            logger.error(f"Error starting HLS stream: {e}")
+            return make_response("Error starting stream", 500)
+    
+    # Serve the file
+    if file_path and os.path.exists(file_path):
+        try:
+            if filename.endswith('.m3u8'):
+                mimetype = 'application/vnd.apple.mpegurl'
+            elif filename.endswith('.ts'):
+                mimetype = 'video/mp2t'
+            else:
+                mimetype = 'application/octet-stream'
+            
+            return send_file(file_path, mimetype=mimetype)
+        except Exception as e:
+            logger.error(f"Error serving HLS file {filename}: {e}")
+            return make_response("Error serving file", 500)
+    else:
+        logger.warning(f"HLS file not found: {filename} for {stream_key}")
+        return make_response("File not found", 404)
+
+
+@app.route("/api/dashboard")
 @authorise
 def dashboard():
+    """Legacy template route"""
     return render_template("dashboard.html")
 
 
@@ -1824,6 +2178,39 @@ def refresh_lineup_endpoint():
     refresh_lineup()
     return jsonify({"status": "Lineup refreshed successfully"})
 
+@app.route("/", methods=["GET"])
+def home():
+    """Serve React app"""
+    try:
+        return app.send_static_file('dist/index.html')
+    except:
+        # Fallback to redirect if React build doesn't exist
+        return redirect("/api/portals", code=302)
+
+
+# Catch-all route to redirect to template routes or serve static files
+# This must be the last route defined!
+@app.route("/<path:path>")
+def catch_all(path):
+    """Redirect to template routes or serve static files"""
+    # Redirect template routes to their API equivalents
+    if path == 'portals':
+        return redirect("/api/portals", code=302)
+    elif path == 'editor':
+        return redirect("/api/editor", code=302)
+    elif path == 'settings':
+        return redirect("/api/settings", code=302)
+    elif path == 'dashboard':
+        return redirect("/api/dashboard", code=302)
+    
+    # Check if it's a file in static/dist (like assets)
+    try:
+        return app.send_static_file(f'dist/{path}')
+    except:
+        # For any other path, redirect to portals (main page)
+        return redirect("/api/portals", code=302)
+
+
 def start_refresh():
     # Run refresh functions in separate threads
     # First refresh channels cache, then refresh lineup and xmltv
@@ -1855,6 +2242,12 @@ if __name__ == "__main__":
 
     # Start the refresh thread before the server
     start_refresh()
+    
+    # Start HLS stream manager monitoring
+    hls_manager.start_monitoring()
+    
+    # Register cleanup handler for HLS streams
+    atexit.register(hls_manager.cleanup_all)
 
     # Start the server
     if "TERM_PROGRAM" in os.environ.keys() and os.environ["TERM_PROGRAM"] == "vscode":
