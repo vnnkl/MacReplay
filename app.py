@@ -418,7 +418,8 @@ class HLSStreamManager:
             
             
             # HLS output settings with conditional flags
-            hls_flags = "independent_segments+delete_segments+omit_endlist"
+            # Removed delete_segments to prevent premature segment deletion
+            hls_flags = "independent_segments+omit_endlist"
             
             # Add format-specific flags only when needed
             if segment_type == "mpegts":
@@ -502,12 +503,12 @@ class HLSStreamManager:
                 
                 # Create master playlist manually (FFmpeg doesn't create it for single streams)
                 # This points to the stream.m3u8 that FFmpeg generates
+                # Omit CODECS to let Plex auto-detect (more compatible)
                 try:
                     with open(master_playlist_path, 'w') as f:
                         f.write("#EXTM3U\n")
-                        f.write("#EXT-X-VERSION:7\n")
-                        # Generic codecs - will match both H.264 and HEVC
-                        f.write(f'#EXT-X-STREAM-INF:BANDWIDTH=5000000,CODECS="avc1.640028,mp4a.40.2"\n')
+                        f.write("#EXT-X-VERSION:3\n")  # Use v3 for max compatibility
+                        f.write(f'#EXT-X-STREAM-INF:BANDWIDTH=5000000\n')
                         f.write("stream.m3u8\n")
                     logger.debug(f"Created master playlist at {master_playlist_path}")
                 except Exception as e:
@@ -2276,6 +2277,15 @@ def hls_stream(portalId, channelId, filename):
             
             file_size = os.path.getsize(file_path)
             logger.debug(f"Serving {filename} ({file_size} bytes, {mimetype})")
+            
+            # For playlist files, log what segments are actually available
+            if filename.endswith('.m3u8') and file_path:
+                try:
+                    temp_dir = hls_manager.streams[stream_key]['temp_dir']
+                    available_files = [f for f in os.listdir(temp_dir) if f.endswith('.ts') or f.endswith('.m4s')]
+                    logger.debug(f"Available segments in temp dir: {sorted(available_files)}")
+                except Exception as e:
+                    logger.debug(f"Could not list segments: {e}")
             
             # For playlists, log the content for debugging
             if filename.endswith('.m3u8') and file_size < 5000:  # Only log small playlists
