@@ -447,17 +447,32 @@ class HLSStreamManager:
                     ffmpeg_cmd,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1
                 )
                 
                 logger.debug(f"FFmpeg process started with PID: {process.pid}")
                 
-                # Create master playlist
-                with open(master_playlist_path, 'w') as f:
-                    f.write("#EXTM3U\n")
-                    f.write("#EXT-X-VERSION:7\n")
-                    f.write('#EXT-X-STREAM-INF:BANDWIDTH=15000000,CODECS="avc1.640028,mp4a.40.2"\n')
-                    f.write("stream.m3u8\n")
+                # Start thread to read FFmpeg stderr for error logging
+                def log_ffmpeg_stderr():
+                    try:
+                        for line in process.stderr:
+                            line = line.strip()
+                            if line:
+                                # Log important FFmpeg messages
+                                if 'error' in line.lower() or 'failed' in line.lower():
+                                    logger.error(f"FFmpeg[{process.pid}]: {line}")
+                                elif 'warning' in line.lower():
+                                    logger.warning(f"FFmpeg[{process.pid}]: {line}")
+                                elif any(x in line.lower() for x in ['output', 'stream', 'duration', 'encoder']):
+                                    logger.debug(f"FFmpeg[{process.pid}]: {line}")
+                    except Exception as e:
+                        logger.debug(f"FFmpeg stderr reader thread ended: {e}")
+                
+                import threading
+                stderr_thread = threading.Thread(target=log_ffmpeg_stderr, daemon=True)
+                stderr_thread.start()
                 
                 # Store stream info
                 stream_info = {
@@ -513,11 +528,13 @@ class HLSStreamManager:
                 logger.debug(f"Serving file: {filename} ({file_size} bytes)")
                 return file_path
             else:
-                logger.warning(f"File not found: {filename} for {stream_key} (expected at {file_path})")
-                # Check if FFmpeg process is still running
+                # File not found - check if FFmpeg died (only log error if it crashed)
                 if not is_passthrough and stream_info['process']:
                     if stream_info['process'].poll() is not None:
-                        logger.error(f"FFmpeg process died for {stream_key} (exit code: {stream_info['process'].returncode})")
+                        exit_code = stream_info['process'].returncode
+                        logger.error(f"FFmpeg process died for {stream_key} (exit code: {exit_code})")
+                        logger.error(f"Missing file: {filename} (expected at {file_path})")
+                # Don't log WARNING here - the caller will log if timeout occurs
                 return None
     
     def cleanup_all(self):
