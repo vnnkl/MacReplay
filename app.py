@@ -2096,15 +2096,33 @@ def hls_stream(portalId, channelId, filename):
     
     # Check if we already have this stream
     stream_key = f"{portalId}_{channelId}"
-    file_path = hls_manager.get_file(portalId, channelId, filename)
     
-    if file_path:
-        logger.debug(f"Stream already active, serving file: {filename}")
+    # First, check if stream is already active
+    stream_exists = stream_key in hls_manager.streams
+    
+    if stream_exists:
+        logger.debug(f"Stream already active for {stream_key}, checking for file: {filename}")
+        # For active streams, wait a bit for the file if it's a playlist
+        if filename.endswith('.m3u8'):
+            is_passthrough = hls_manager.streams[stream_key].get('is_passthrough', False)
+            max_wait = 100 if not is_passthrough else 10  # 10s for FFmpeg, 1s for passthrough
+            logger.debug(f"Waiting for {filename} from active stream (passthrough={is_passthrough})")
+            
+            for wait_count in range(max_wait):
+                file_path = hls_manager.get_file(portalId, channelId, filename)
+                if file_path:
+                    logger.debug(f"File ready after {wait_count * 0.1:.1f}s")
+                    break
+                time.sleep(0.1)
+        else:
+            # For segments, just try to get the file
+            file_path = hls_manager.get_file(portalId, channelId, filename)
     else:
-        logger.debug(f"Stream not active or file not ready, checking if we need to start stream")
+        logger.debug(f"Stream not active, will need to start it")
+        file_path = None
     
-    # If file doesn't exist and this is a playlist request, start the stream
-    if not file_path and (filename.endswith('.m3u8') or filename.endswith('.ts')):
+    # If file doesn't exist and this is a playlist/segment request, start the stream
+    if not file_path and (filename.endswith('.m3u8') or filename.endswith('.ts') or filename.endswith('.m4s')):
         # Get the stream URL
         logger.debug(f"Fetching stream URL for channel {channelId} from portal {portalName}")
         link = None
@@ -2139,27 +2157,44 @@ def hls_stream(portalId, channelId, filename):
         
         # Start the HLS stream
         try:
-            logger.debug(f"Calling start_stream for {stream_key}")
+            logger.debug(f"Starting new stream for {stream_key}")
             stream_info = hls_manager.start_stream(portalId, channelId, link, proxy)
             
-            # Wait a moment for the first segments to be created
+            # Wait for FFmpeg to create the requested file
+            # For non-passthrough streams, FFmpeg needs time to start encoding
+            is_passthrough = stream_info.get('is_passthrough', False)
+            
             if filename.endswith('.m3u8'):
-                # For playlist requests, wait up to 5 seconds for the file
-                logger.debug(f"Waiting for playlist file: {filename}")
-                wait_count = 0
-                for _ in range(50):  # 50 * 0.1 = 5 seconds
+                # For playlist requests, wait up to 10 seconds for FFmpeg to create the file
+                logger.debug(f"Waiting for playlist file: {filename} (passthrough={is_passthrough})")
+                max_wait = 100 if not is_passthrough else 10  # 10s for FFmpeg, 1s for passthrough
+                
+                for wait_count in range(max_wait):
                     file_path = hls_manager.get_file(portalId, channelId, filename)
                     if file_path:
                         logger.debug(f"Playlist ready after {wait_count * 0.1:.1f}s")
                         break
-                    wait_count += 1
                     time.sleep(0.1)
                 
                 if not file_path:
-                    logger.warning(f"Playlist {filename} not ready after 5 seconds")
+                    logger.warning(f"Playlist {filename} not ready after {max_wait * 0.1:.0f} seconds")
+                    # Check if FFmpeg process crashed
+                    if not is_passthrough and stream_key in hls_manager.streams:
+                        process = hls_manager.streams[stream_key]['process']
+                        if process.poll() is not None:
+                            logger.error(f"FFmpeg crashed during startup (exit code: {process.returncode})")
             else:
-                # For segment requests, get the file path
-                file_path = hls_manager.get_file(portalId, channelId, filename)
+                # For segment requests, wait a bit for the segment to be created
+                logger.debug(f"Waiting for segment file: {filename}")
+                for wait_count in range(30):  # 30 * 0.1 = 3 seconds
+                    file_path = hls_manager.get_file(portalId, channelId, filename)
+                    if file_path:
+                        logger.debug(f"Segment ready after {wait_count * 0.1:.1f}s")
+                        break
+                    time.sleep(0.1)
+                
+                if not file_path:
+                    logger.warning(f"Segment {filename} not ready after 3 seconds")
         
         except Exception as e:
             logger.error(f"✗ Error starting HLS stream: {e}")
