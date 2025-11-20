@@ -316,7 +316,7 @@ class HLSStreamManager:
             
             # Get HLS settings
             settings = getSettings()
-            segment_type = settings.get("hls segment type", "fmp4")
+            segment_type = settings.get("hls segment type", "mpegts")  # Default to mpegts for compatibility
             segment_duration = settings.get("hls segment duration", "4")
             playlist_size = settings.get("hls playlist size", "6")
             timeout = int(settings.get("ffmpeg timeout", "5")) * 1000000
@@ -397,22 +397,29 @@ class HLSStreamManager:
             ffmpeg_cmd.extend(["-timeout", str(timeout)])
             
             # Input and output settings
-            ffmpeg_cmd.extend(["-i", stream_url, "-c:v", "copy"])
+            ffmpeg_cmd.extend([
+                "-i", stream_url,
+                "-c:v", "copy",
+                "-tag:v", "hvc1"  # Fix HEVC tagging for better Plex compatibility
+            ])
             
-            # Audio codec depends on segment type
+            # Audio codec and container-specific settings
             if segment_type == "fmp4":
                 # fMP4 requires AAC audio - transcode if needed
                 # Many IPTV streams use MP2/AC3 audio which doesn't work in fMP4
                 ffmpeg_cmd.extend([
-                    "-c:a", "aac",       # Transcode audio to AAC
-                    "-ac", "2",          # Stereo audio
+                    "-c:a", "aac",                    # Transcode audio to AAC
+                    "-ac", "2",                       # Stereo audio
+                    "-avoid_negative_ts", "make_zero" # Fix timestamp issues for Plex
                 ])
                 logger.debug(f"Using fMP4 with AAC audio transcoding")
             else:
                 # MPEG-TS can use any audio codec - just copy it
                 # This is faster, uses less CPU, and works with any FFmpeg build
                 ffmpeg_cmd.extend([
-                    "-c:a", "copy",      # Copy audio as-is (no transcoding)
+                    "-c:a", "copy",                   # Copy audio as-is (no transcoding)
+                    "-avoid_negative_ts", "make_zero", # Fix timestamp issues for Plex
+                    "-mpegts_copyts", "1"             # Preserve original timestamps
                 ])
                 logger.debug(f"Using MPEG-TS with audio copy (no transcoding)")
             
