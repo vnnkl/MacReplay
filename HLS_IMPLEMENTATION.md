@@ -82,9 +82,12 @@ Optimized HLS command with:
 
 ## Configuration
 
-### Default Settings
+### Default Settings (Plex-Optimized)
 ```python
-"output format": "mpegts"  # Options: "mpegts" or "hls"
+"output format": "mpegts"           # Options: "mpegts" or "hls"
+"hls segment type": "fmp4"          # Options: "fmp4" (Plex-optimized) or "mpegts"
+"hls segment duration": "4"         # Seconds per segment (2-10)
+"hls playlist size": "6"            # Number of segments to keep (3-20)
 ```
 
 ### HLS Manager Settings
@@ -93,10 +96,35 @@ max_streams = 10           # Maximum concurrent HLS streams
 inactive_timeout = 30      # Seconds before inactive stream cleanup
 ```
 
-### FFmpeg HLS Command
+### FFmpeg HLS Command (Auto-Generated)
+The HLS command is now dynamically built based on settings:
+
+**For fMP4 segments (Plex-optimized, default):**
 ```bash
 ffmpeg \
   -fflags +genpts+igndts \
+  -err_detect aggressive \
+  -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 \
+  -reconnect_delay_max 15 \
+  -timeout <timeout> \
+  -i <stream_url> \
+  -c copy \
+  -f hls \
+  -hls_time 4 \
+  -hls_list_size 6 \
+  -hls_flags independent_segments+delete_segments+omit_endlist \
+  -hls_segment_type fmp4 \
+  -hls_segment_filename <temp_dir>/seg_%03d.m4s \
+  -hls_fmp4_init_filename init.mp4 \
+  -master_pl_name master.m3u8 \
+  <temp_dir>/stream.m3u8
+```
+
+**For MPEG-TS segments (better compatibility):**
+```bash
+ffmpeg \
+  -fflags +genpts+igndts \
+  -err_detect aggressive \
   -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 \
   -reconnect_delay_max 15 \
   -timeout <timeout> \
@@ -114,12 +142,21 @@ ffmpeg \
 
 ## Usage
 
-### For End Users
+### For End Users (Plex-Optimized Setup)
 1. Navigate to Settings page
 2. Change "Output Format" to "HLS (segmented)"
-3. Save settings
-4. Reload playlist in Plex/Apple TV
-5. Enjoy instant channel starts!
+3. **Set "HLS Segment Type" to "fMP4" (recommended for Plex)**
+4. Keep "HLS Segment Duration" at 4 seconds
+5. Keep "HLS Playlist Size" at 6 segments
+6. Save settings
+7. Reload playlist in Plex/Apple TV
+8. Enjoy instant channel starts (1-4 seconds)!
+
+### Troubleshooting Plex Issues
+If Plex still shows a loading screen:
+- Try changing "HLS Segment Type" to "MPEG-TS" (better compatibility but slower)
+- Increase "HLS Segment Duration" to 6 seconds (more stable but slower start)
+- Check logs for FFmpeg errors
 
 ### For Developers
 ```python

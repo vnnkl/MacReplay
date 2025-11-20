@@ -38,10 +38,44 @@
                     </div>
                     
                     <div class="mb-3">
-                        <label for="ffmpeg_command" class="form-label">FFmpeg Command</label>
+                        <label for="hls_segment_type" class="form-label">HLS Segment Type</label>
+                        <select class="form-select" id="hls_segment_type" name="hls segment type">
+                            <option value="fmp4" {{ 'selected' if settings['hls segment type'] == 'fmp4' }}>fMP4 - Best for Plex (recommended)</option>
+                            <option value="mpegts" {{ 'selected' if settings['hls segment type'] == 'mpegts' }}>MPEG-TS - Better compatibility</option>
+                        </select>
+                        <div class="form-text">
+                            fMP4 provides better Plex compatibility and faster startup. Only applies when Output Format is HLS.
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="hls_segment_duration" class="form-label">HLS Segment Duration (seconds)</label>
+                                <input type="number" class="form-control" id="hls_segment_duration" name="hls segment duration" 
+                                       value="{{ settings['hls segment duration'] }}" min="2" max="10">
+                                <div class="form-text">
+                                    Lower = faster start, more CPU. Recommended: 4 seconds.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="hls_playlist_size" class="form-label">HLS Playlist Size (segments)</label>
+                                <input type="number" class="form-control" id="hls_playlist_size" name="hls playlist size" 
+                                       value="{{ settings['hls playlist size'] }}" min="3" max="20">
+                                <div class="form-text">
+                                    Number of segments to keep. Recommended: 6.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="ffmpeg_command" class="form-label">FFmpeg Command (MPEG-TS only)</label>
                         <textarea class="form-control" id="ffmpeg_command" name="ffmpeg command" rows="3">{{ settings['ffmpeg command'] }}</textarea>
                         <div class="form-text">
-                            Use placeholders: &lt;url&gt;, &lt;proxy&gt;, &lt;timeout&gt;
+                            Use placeholders: &lt;url&gt;, &lt;proxy&gt;, &lt;timeout&gt;. Only used when Output Format is MPEG-TS.
                         </div>
                     </div>
                     

@@ -137,6 +137,9 @@ defaultSettings = {
     "stream method": "ffmpeg",
     "output format": "mpegts",
     "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -strict experimental -analyzeduration 0 -probesize 32 -copyts -threads 12 pipe:",
+    "hls segment type": "fmp4",
+    "hls segment duration": "4",
+    "hls playlist size": "6",
     "ffmpeg timeout": "5",
     "test streams": "true",
     "try all macs": "true",
@@ -273,11 +276,25 @@ class HLSStreamManager:
                 logger.error(f"Max concurrent streams ({self.max_streams}) reached")
                 raise Exception(f"Maximum concurrent streams ({self.max_streams}) reached")
             
+            # Get HLS settings
+            settings = getSettings()
+            segment_type = settings.get("hls segment type", "fmp4")
+            segment_duration = settings.get("hls segment duration", "4")
+            playlist_size = settings.get("hls playlist size", "6")
+            timeout = int(settings.get("ffmpeg timeout", "5")) * 1000000
+            
             # Create temp directory for HLS segments
             temp_dir = tempfile.mkdtemp(prefix=f"macreplay_hls_{stream_key}_")
             playlist_path = os.path.join(temp_dir, "stream.m3u8")
             master_playlist_path = os.path.join(temp_dir, "master.m3u8")
-            segment_pattern = os.path.join(temp_dir, "seg_%03d.ts")
+            
+            # Set segment pattern and init file based on segment type
+            if segment_type == "fmp4":
+                segment_pattern = os.path.join(temp_dir, "seg_%03d.m4s")
+                init_filename = "init.mp4"
+            else:
+                segment_pattern = os.path.join(temp_dir, "seg_%03d.ts")
+                init_filename = None
             
             # Build FFmpeg command for HLS
             ffmpeg_cmd = [
@@ -295,7 +312,6 @@ class HLSStreamManager:
                 ffmpeg_cmd.extend(["-http_proxy", proxy])
             
             # Add timeout
-            timeout = int(getSettings().get("ffmpeg timeout", "5")) * 1000000
             ffmpeg_cmd.extend(["-timeout", str(timeout)])
             
             # Input and output settings
@@ -303,11 +319,19 @@ class HLSStreamManager:
                 "-i", stream_url,
                 "-c", "copy",
                 "-f", "hls",
-                "-hls_time", "4",
-                "-hls_list_size", "6",
+                "-hls_time", segment_duration,
+                "-hls_list_size", playlist_size,
                 "-hls_flags", "independent_segments+delete_segments+omit_endlist",
-                "-hls_segment_type", "mpegts",
+                "-hls_segment_type", segment_type,
                 "-hls_segment_filename", segment_pattern,
+            ])
+            
+            # Add init filename for fMP4
+            if segment_type == "fmp4":
+                ffmpeg_cmd.extend(["-hls_fmp4_init_filename", init_filename])
+            
+            # Add master playlist and output
+            ffmpeg_cmd.extend([
                 "-master_pl_name", "master.m3u8",
                 playlist_path
             ])
