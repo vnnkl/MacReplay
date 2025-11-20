@@ -214,6 +214,14 @@ class HLSStreamManager:
                     returncode = stream_info['process'].returncode
                     if returncode != 0:
                         logger.error(f"HLS stream {stream_key} crashed with code {returncode}")
+                        # Try to get stderr output
+                        try:
+                            stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
+                            if stderr_output:
+                                # Log last 1000 characters of error
+                                logger.error(f"FFmpeg error output for {stream_key}:\n{stderr_output[-1000:]}")
+                        except Exception as e:
+                            logger.error(f"Could not read FFmpeg stderr: {e}")
                     streams_to_remove.append(stream_key)
                     continue
                 
@@ -240,6 +248,14 @@ class HLSStreamManager:
                 if stream_info['process'].poll() is None:
                     stream_info['process'].terminate()
                     stream_info['process'].wait(timeout=5)
+                else:
+                    # Process already exited, log stderr if available
+                    try:
+                        stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
+                        if stderr_output:
+                            logger.error(f"FFmpeg stderr for {stream_key}: {stderr_output[-500:]}")  # Last 500 chars
+                    except:
+                        pass
             except Exception as e:
                 logger.error(f"Error terminating FFmpeg for {stream_key}: {e}")
                 try:
@@ -338,6 +354,9 @@ class HLSStreamManager:
             
             # Start FFmpeg process
             try:
+                # Log the FFmpeg command for debugging
+                logger.info(f"Starting FFmpeg with command: {' '.join(ffmpeg_cmd)}")
+                
                 process = subprocess.Popen(
                     ffmpeg_cmd,
                     stdin=subprocess.DEVNULL,
