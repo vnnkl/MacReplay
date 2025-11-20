@@ -209,21 +209,23 @@ class HLSStreamManager:
         
         with self.lock:
             for stream_key, stream_info in self.streams.items():
-                # Check if process has crashed
-                if stream_info['process'].poll() is not None:
-                    returncode = stream_info['process'].returncode
-                    if returncode != 0:
-                        logger.error(f"HLS stream {stream_key} crashed with code {returncode}")
-                        # Try to get stderr output
-                        try:
-                            stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
-                            if stderr_output:
-                                # Log last 1000 characters of error
-                                logger.error(f"FFmpeg error output for {stream_key}:\n{stderr_output[-1000:]}")
-                        except Exception as e:
-                            logger.error(f"Could not read FFmpeg stderr: {e}")
-                    streams_to_remove.append(stream_key)
-                    continue
+                # Skip process checks for passthrough streams
+                if not stream_info.get('is_passthrough', False):
+                    # Check if process has crashed
+                    if stream_info['process'].poll() is not None:
+                        returncode = stream_info['process'].returncode
+                        if returncode != 0:
+                            logger.error(f"HLS stream {stream_key} crashed with code {returncode}")
+                            # Try to get stderr output
+                            try:
+                                stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
+                                if stderr_output:
+                                    # Log last 1000 characters of error
+                                    logger.error(f"FFmpeg error output for {stream_key}:\n{stderr_output[-1000:]}")
+                            except Exception as e:
+                                logger.error(f"Could not read FFmpeg stderr: {e}")
+                        streams_to_remove.append(stream_key)
+                        continue
                 
                 # Check if stream is inactive
                 inactive_time = current_time - stream_info['last_accessed']
@@ -243,25 +245,26 @@ class HLSStreamManager:
             
             stream_info = self.streams[stream_key]
             
-            # Terminate FFmpeg process
-            try:
-                if stream_info['process'].poll() is None:
-                    stream_info['process'].terminate()
-                    stream_info['process'].wait(timeout=5)
-                else:
-                    # Process already exited, log stderr if available
+            # Terminate FFmpeg process (skip for passthrough streams)
+            if not stream_info.get('is_passthrough', False):
+                try:
+                    if stream_info['process'].poll() is None:
+                        stream_info['process'].terminate()
+                        stream_info['process'].wait(timeout=5)
+                    else:
+                        # Process already exited, log stderr if available
+                        try:
+                            stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
+                            if stderr_output:
+                                logger.error(f"FFmpeg stderr for {stream_key}: {stderr_output[-500:]}")  # Last 500 chars
+                        except:
+                            pass
+                except Exception as e:
+                    logger.error(f"Error terminating FFmpeg for {stream_key}: {e}")
                     try:
-                        stderr_output = stream_info['process'].stderr.read().decode('utf-8', errors='ignore')
-                        if stderr_output:
-                            logger.error(f"FFmpeg stderr for {stream_key}: {stderr_output[-500:]}")  # Last 500 chars
+                        stream_info['process'].kill()
                     except:
                         pass
-            except Exception as e:
-                logger.error(f"Error terminating FFmpeg for {stream_key}: {e}")
-                try:
-                    stream_info['process'].kill()
-                except:
-                    pass
             
             # Clean up temp directory
             try:
@@ -299,10 +302,44 @@ class HLSStreamManager:
             playlist_size = settings.get("hls playlist size", "6")
             timeout = int(settings.get("ffmpeg timeout", "5")) * 1000000
             
+            # Detect if source is already HLS (e.g., Pluto TV stitcher URLs)
+            is_source_hls = (".m3u8" in stream_url.lower() or 
+                           "hls" in stream_url.lower() or 
+                           "stitcher" in stream_url.lower())
+            
             # Create temp directory for HLS segments
             temp_dir = tempfile.mkdtemp(prefix=f"macreplay_hls_{stream_key}_")
             playlist_path = os.path.join(temp_dir, "stream.m3u8")
             master_playlist_path = os.path.join(temp_dir, "master.m3u8")
+            
+            # If source is already HLS, create a proxy/passthrough instead of re-encoding
+            if is_source_hls:
+                logger.info(f"Source is HLS, creating passthrough for {stream_key}")
+                
+                # Store stream info with passthrough flag
+                stream_info = {
+                    'process': None,  # No FFmpeg process for passthrough
+                    'temp_dir': temp_dir,
+                    'playlist_path': playlist_path,
+                    'master_playlist_path': master_playlist_path,
+                    'last_accessed': time.time(),
+                    'portal_id': portal_id,
+                    'channel_id': channel_id,
+                    'stream_url': stream_url,
+                    'is_passthrough': True
+                }
+                
+                # Create master playlist that points to the source
+                with open(master_playlist_path, 'w') as f:
+                    f.write("#EXTM3U\n")
+                    f.write("#EXT-X-VERSION:7\n")
+                    f.write(f'#EXT-X-STREAM-INF:BANDWIDTH=15000000,CODECS="avc1.640028,mp4a.40.2"\n')
+                    f.write(stream_url + "\n")
+                
+                self.streams[stream_key] = stream_info
+                logger.info(f"Created HLS passthrough for {stream_key}")
+                
+                return stream_info
             
             # Set segment pattern and init file based on segment type
             if segment_type == "fmp4":
@@ -388,7 +425,8 @@ class HLSStreamManager:
                     'last_accessed': time.time(),
                     'portal_id': portal_id,
                     'channel_id': channel_id,
-                    'stream_url': stream_url
+                    'stream_url': stream_url,
+                    'is_passthrough': False
                 }
                 
                 self.streams[stream_key] = stream_info
