@@ -2200,10 +2200,16 @@ def refresh_lineup():
         channel_name = row['custom_name'] if row['custom_name'] else row['name']
         channel_number = row['custom_number'] if row['custom_number'] else row['number']
         
+        # Use HLS URL if output format is set to HLS, otherwise use MPEG-TS
+        if getSettings().get("output format", "mpegts") == "hls":
+            url = f"http://{host}/hls/{portal}/{channel_id}/master.m3u8"
+        else:
+            url = f"http://{host}/play/{portal}/{channel_id}"
+        
         lineup.append({
             "GuideNumber": str(channel_number),
             "GuideName": channel_name,
-            "URL": f"http://{host}/play/{portal}/{channel_id}"
+            "URL": url
         })
     
     conn.close()
