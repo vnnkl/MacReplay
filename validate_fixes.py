@@ -193,7 +193,7 @@ def main():
         ("Default Segment Type", validate_default_segment_type),
         ("Video Copy Only (No Transcoding)", validate_video_copy_only),
         ("HLS Flags Configuration", validate_hls_flags),
-        ("No Manual Master Playlist", validate_no_manual_master_playlist),
+        # Master playlist validation skipped - we manually create it now
         ("Reconnection Flags", validate_reconnection_flags),
     ]
     

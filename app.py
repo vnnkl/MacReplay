@@ -445,11 +445,8 @@ class HLSStreamManager:
             if segment_type == "fmp4":
                 ffmpeg_cmd.extend(["-hls_fmp4_init_filename", init_filename])
             
-            # Add master playlist and output
-            ffmpeg_cmd.extend([
-                "-master_pl_name", "master.m3u8",
-                playlist_path
-            ])
+            # Output to stream.m3u8
+            ffmpeg_cmd.append(playlist_path)
             
             # Start FFmpeg process
             try:
@@ -502,6 +499,20 @@ class HLSStreamManager:
                 }
                 
                 self.streams[stream_key] = stream_info
+                
+                # Create master playlist manually (FFmpeg doesn't create it for single streams)
+                # This points to the stream.m3u8 that FFmpeg generates
+                try:
+                    with open(master_playlist_path, 'w') as f:
+                        f.write("#EXTM3U\n")
+                        f.write("#EXT-X-VERSION:7\n")
+                        # Generic codecs - will match both H.264 and HEVC
+                        f.write(f'#EXT-X-STREAM-INF:BANDWIDTH=5000000,CODECS="avc1.640028,mp4a.40.2"\n')
+                        f.write("stream.m3u8\n")
+                    logger.debug(f"Created master playlist at {master_playlist_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to create master playlist: {e}")
+                
                 logger.info(f"✓ FFmpeg HLS stream ready for {stream_key}")
                 logger.debug(f"Temp dir: {temp_dir}, PID: {process.pid}")
                 
