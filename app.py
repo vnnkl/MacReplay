@@ -2183,6 +2183,14 @@ def hls_stream(portalId, channelId, filename):
                         process = hls_manager.streams[stream_key]['process']
                         if process.poll() is not None:
                             logger.error(f"FFmpeg crashed during startup (exit code: {process.returncode})")
+                        else:
+                            # FFmpeg is still running, check what files exist in temp dir
+                            temp_dir = hls_manager.streams[stream_key]['temp_dir']
+                            try:
+                                files = os.listdir(temp_dir)
+                                logger.warning(f"FFmpeg still running but {filename} not found. Temp dir contains: {files}")
+                            except Exception as e:
+                                logger.error(f"Could not list temp dir: {e}")
             else:
                 # For segment requests, wait a bit for the segment to be created
                 logger.debug(f"Waiting for segment file: {filename}")
@@ -2215,6 +2223,16 @@ def hls_stream(portalId, channelId, filename):
             
             file_size = os.path.getsize(file_path)
             logger.debug(f"Serving {filename} ({file_size} bytes, {mimetype})")
+            
+            # For playlists, log the content for debugging
+            if filename.endswith('.m3u8') and file_size < 5000:  # Only log small playlists
+                try:
+                    with open(file_path, 'r') as f:
+                        content = f.read()
+                        logger.debug(f"Playlist content:\n{content}")
+                except Exception as e:
+                    logger.debug(f"Could not read playlist content: {e}")
+            
             return send_file(file_path, mimetype=mimetype)
         except Exception as e:
             logger.error(f"✗ Error serving HLS file {filename}: {e}")
