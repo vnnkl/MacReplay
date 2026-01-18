@@ -1983,19 +1983,26 @@ def channel(portalId, channelId):
                         logger.debug(f"Error checking HLS segments: {e}")
 
             if getSettings().get("test streams", "true") == "false" or testStream():
-                # If HLS output format is selected but HLS not ready, start HLS and redirect
-                # (Can't run MPEG-TS and HLS in parallel - provider only allows one connection)
+                # If HLS output format is selected, always use HLS (never fall through to MPEG-TS)
+                # This prevents dual-stream conflicts with providers that limit connections
                 if not web and getSettings().get("output format", "mpegts") == "hls":
                     stream_key = f"{portalId}_{channelId}"
                     if stream_key not in hls_manager.streams:
                         logger.info(f"Starting HLS stream for {stream_key}")
                         try:
                             hls_manager.start_stream(portalId, channelId, link, proxy)
-                            # Redirect to HLS - empty playlist fallback will handle startup delay
-                            return redirect(f"/hls/{portalId}/{channelId}/master.m3u8")
                         except Exception as e:
                             logger.error(f"Failed to start HLS for {stream_key}: {e}")
                             # Fall through to MPEG-TS as fallback
+                            pass
+                        else:
+                            # HLS started successfully - redirect
+                            return redirect(f"/hls/{portalId}/{channelId}/master.m3u8")
+                    else:
+                        # HLS stream already exists (starting up) - redirect to it
+                        # Empty playlist fallback will handle the startup delay
+                        logger.info(f"HLS stream starting for {stream_key}, redirecting")
+                        return redirect(f"/hls/{portalId}/{channelId}/master.m3u8")
 
                 if web:
                     ffmpegcmd = [
