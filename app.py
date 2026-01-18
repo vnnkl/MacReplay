@@ -1969,30 +1969,25 @@ def channel(portalId, channelId):
                 link = cmd.split(" ")[1]
 
         if link:
+            # Fast path: If HLS already ready, redirect immediately (skip testStream)
+            if not web and getSettings().get("output format", "mpegts") == "hls":
+                stream_key = f"{portalId}_{channelId}"
+                if stream_key in hls_manager.streams:
+                    try:
+                        temp_dir = hls_manager.streams[stream_key]['temp_dir']
+                        segments = [f for f in os.listdir(temp_dir) if f.endswith('.ts') or f.endswith('.m4s')]
+                        if len(segments) >= 2:
+                            logger.info(f"HLS ready for {stream_key} ({len(segments)} segments), instant redirect")
+                            return redirect(f"/hls/{portalId}/{channelId}/master.m3u8")
+                    except Exception as e:
+                        logger.debug(f"Error checking HLS segments: {e}")
+
             if getSettings().get("test streams", "true") == "false" or testStream():
-                # Hybrid MPEG-TS + HLS: Check if HLS output format is selected
-                # and handle HLS with instant MPEG-TS fallback
+                # Hybrid MPEG-TS + HLS: Start HLS in background while serving MPEG-TS
                 if not web and getSettings().get("output format", "mpegts") == "hls":
                     stream_key = f"{portalId}_{channelId}"
-                    hls_ready = False
-
-                    # Check if HLS stream already has segments ready
-                    if stream_key in hls_manager.streams:
-                        try:
-                            temp_dir = hls_manager.streams[stream_key]['temp_dir']
-                            segments = [f for f in os.listdir(temp_dir) if f.endswith('.ts') or f.endswith('.m4s')]
-                            if len(segments) >= 2:
-                                hls_ready = True
-                                logger.info(f"HLS ready for {stream_key} ({len(segments)} segments), redirecting to HLS")
-                        except Exception as e:
-                            logger.debug(f"Error checking HLS segments: {e}")
-
-                    if hls_ready:
-                        # HLS is ready - redirect to HLS endpoint
-                        return redirect(f"/hls/{portalId}/{channelId}/master.m3u8")
-                    else:
-                        # HLS not ready - start HLS in background, serve MPEG-TS immediately
-                        # This gives instant playback while HLS generates in parallel
+                    if stream_key not in hls_manager.streams:
+                        # HLS not running - start it in background, serve MPEG-TS immediately
                         logger.info(f"Starting HLS in background for {stream_key}, serving MPEG-TS now")
 
                         def start_hls_background():
@@ -2003,8 +1998,6 @@ def channel(portalId, channelId):
 
                         hls_thread = threading.Thread(target=start_hls_background, daemon=True)
                         hls_thread.start()
-
-                        # Continue to serve MPEG-TS below (fall through to ffmpeg streaming)
 
                 if web:
                     ffmpegcmd = [
