@@ -1983,21 +1983,19 @@ def channel(portalId, channelId):
                         logger.debug(f"Error checking HLS segments: {e}")
 
             if getSettings().get("test streams", "true") == "false" or testStream():
-                # Hybrid MPEG-TS + HLS: Start HLS in background while serving MPEG-TS
+                # If HLS output format is selected but HLS not ready, start HLS and redirect
+                # (Can't run MPEG-TS and HLS in parallel - provider only allows one connection)
                 if not web and getSettings().get("output format", "mpegts") == "hls":
                     stream_key = f"{portalId}_{channelId}"
                     if stream_key not in hls_manager.streams:
-                        # HLS not running - start it in background, serve MPEG-TS immediately
-                        logger.info(f"Starting HLS in background for {stream_key}, serving MPEG-TS now")
-
-                        def start_hls_background():
-                            try:
-                                hls_manager.start_stream(portalId, channelId, link, proxy)
-                            except Exception as e:
-                                logger.error(f"Background HLS start failed for {stream_key}: {e}")
-
-                        hls_thread = threading.Thread(target=start_hls_background, daemon=True)
-                        hls_thread.start()
+                        logger.info(f"Starting HLS stream for {stream_key}")
+                        try:
+                            hls_manager.start_stream(portalId, channelId, link, proxy)
+                            # Redirect to HLS - empty playlist fallback will handle startup delay
+                            return redirect(f"/hls/{portalId}/{channelId}/master.m3u8")
+                        except Exception as e:
+                            logger.error(f"Failed to start HLS for {stream_key}: {e}")
+                            # Fall through to MPEG-TS as fallback
 
                 if web:
                     ffmpegcmd = [
