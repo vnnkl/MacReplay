@@ -1877,18 +1877,21 @@ def channel(portalId, channelId):
                 ffmpegcmd,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             ) as ffmpeg_sp:
                 while True:
                     chunk = ffmpeg_sp.stdout.read(1024)
                     if len(chunk) == 0:
                         if ffmpeg_sp.poll() != 0:
+                            # Capture stderr for debugging
+                            stderr_output = ffmpeg_sp.stderr.read().decode('utf-8', errors='ignore')[-500:]
+                            logger.error(f"FFmpeg stderr: {stderr_output}")
                             logger.info("Ffmpeg closed with error({}). Moving MAC({}) for Portal({})".format(str(ffmpeg_sp.poll()), mac, portalName))
                             moveMac(portalId, mac)
                         break
                     yield chunk
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
         finally:
             unoccupy()
             ffmpeg_sp.kill()
@@ -2037,7 +2040,8 @@ def channel(portalId, channelId):
                             ffmpegcmd = ffmpegcmd.replace("<proxy>", proxy)
                         else:
                             ffmpegcmd = ffmpegcmd.replace("-http_proxy <proxy>", "")
-                        " ".join(ffmpegcmd.split())  # cleans up multiple whitespaces
+                        ffmpegcmd = " ".join(ffmpegcmd.split())  # cleans up multiple whitespaces
+                        logger.debug(f"FFmpeg command: {ffmpegcmd}")
                         ffmpegcmd = ffmpegcmd.split()
                         return Response(
                             streamData(), mimetype="application/octet-stream"
