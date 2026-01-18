@@ -136,7 +136,7 @@ d_ffmpegcmd = [
 defaultSettings = {
     "stream method": "ffmpeg",
     "output format": "mpegts",
-    "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -i <url> -map 0 -codec copy -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -strict experimental -analyzeduration 0 -probesize 32 -copyts -threads 12 pipe:",
+    "ffmpeg command": "-re -http_proxy <proxy> -timeout <timeout> -fflags +genpts+discardcorrupt -analyzeduration 500000 -probesize 500000 -i <url> -map 0 -codec copy -tag:v hvc1 -avoid_negative_ts make_zero -f mpegts -flush_packets 0 -fflags +nobuffer -flags low_delay -threads 12 pipe:",
     "hls segment type": "mpegts",
     "hls segment duration": "4",
     "hls playlist size": "6",
@@ -479,12 +479,17 @@ class HLSStreamManager:
                         for line in process.stderr:
                             line = line.strip()
                             if line:
+                                # Skip noisy/repetitive HLS muxer messages
+                                if 'Opening' in line and '.m3u8' in line:
+                                    continue
+                                if '[hls @' in line and ('Opening' in line or 'write' in line.lower()):
+                                    continue
                                 # Log important FFmpeg messages
                                 if 'error' in line.lower() or 'failed' in line.lower():
                                     logger.error(f"FFmpeg[{process.pid}]: {line}")
                                 elif 'warning' in line.lower():
                                     logger.warning(f"FFmpeg[{process.pid}]: {line}")
-                                elif any(x in line.lower() for x in ['output', 'stream', 'duration', 'encoder']):
+                                elif any(x in line.lower() for x in ['output', 'duration', 'encoder', 'codec']):
                                     logger.debug(f"FFmpeg[{process.pid}]: {line}")
                     except Exception as e:
                         logger.debug(f"FFmpeg stderr reader thread ended: {e}")
@@ -549,16 +554,11 @@ class HLSStreamManager:
             stream_info = self.streams[stream_key]
             stream_info['last_accessed'] = time.time()
             
-            # Log file access
-            is_passthrough = stream_info.get('is_passthrough', False)
-            logger.debug(f"File request: {stream_key}/{filename} (passthrough={is_passthrough})")
-            
             # Determine file path
             file_path = os.path.join(stream_info['temp_dir'], filename)
-            
+            is_passthrough = stream_info.get('is_passthrough', False)
+
             if os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-                logger.debug(f"Serving file: {filename} ({file_size} bytes)")
                 return file_path
             else:
                 # File not found - check if FFmpeg died (only log error if it crashed)
@@ -2196,39 +2196,33 @@ def hls_stream(portalId, channelId, filename):
     stream_exists = stream_key in hls_manager.streams
     
     if stream_exists:
-        logger.debug(f"Stream already active for {stream_key}, checking for file: {filename}")
         # For active streams, wait a bit for the file if it's a playlist
         if filename.endswith('.m3u8'):
             is_passthrough = hls_manager.streams[stream_key].get('is_passthrough', False)
             max_wait = 100 if not is_passthrough else 10  # 10s for FFmpeg, 1s for passthrough
-            logger.debug(f"Waiting for {filename} from active stream (passthrough={is_passthrough})")
-            
+
             for wait_count in range(max_wait):
                 file_path = hls_manager.get_file(portalId, channelId, filename)
                 if file_path:
-                    logger.debug(f"File ready after {wait_count * 0.1:.1f}s")
                     break
                 time.sleep(0.1)
         else:
             # For segments, just try to get the file
             file_path = hls_manager.get_file(portalId, channelId, filename)
     else:
-        logger.debug(f"Stream not active, will need to start it")
         file_path = None
     
     # If file doesn't exist and this is a playlist/segment request, start the stream
     if not file_path and (filename.endswith('.m3u8') or filename.endswith('.ts') or filename.endswith('.m4s')):
         # Get the stream URL
-        logger.debug(f"Fetching stream URL for channel {channelId} from portal {portalName}")
         link = None
         for mac in macs:
             try:
-                logger.debug(f"Trying MAC: {mac}")
                 token = stb.getToken(url, mac, proxy)
                 if token:
                     stb.getProfile(url, mac, token, proxy)
                     channels = stb.getAllChannels(url, mac, token, proxy)
-                    
+
                     if channels:
                         for c in channels:
                             if str(c["id"]) == channelId:
@@ -2237,9 +2231,8 @@ def hls_stream(portalId, channelId, filename):
                                     link = stb.getLink(url, mac, token, cmd, proxy)
                                 else:
                                     link = cmd.split(" ")[1]
-                                logger.debug(f"Found stream URL for channel {channelId}")
                                 break
-                    
+
                     if link:
                         break
             except Exception as e:
@@ -2315,27 +2308,6 @@ def hls_stream(portalId, channelId, filename):
                 mimetype = 'video/mp4'
             else:
                 mimetype = 'application/octet-stream'
-            
-            file_size = os.path.getsize(file_path)
-            logger.debug(f"Serving {filename} ({file_size} bytes, {mimetype})")
-            
-            # For playlist files, log what segments are actually available
-            if filename.endswith('.m3u8') and file_path:
-                try:
-                    temp_dir = hls_manager.streams[stream_key]['temp_dir']
-                    available_files = [f for f in os.listdir(temp_dir) if f.endswith('.ts') or f.endswith('.m4s')]
-                    logger.debug(f"Available segments in temp dir: {sorted(available_files)}")
-                except Exception as e:
-                    logger.debug(f"Could not list segments: {e}")
-            
-            # For playlists, log the content for debugging
-            if filename.endswith('.m3u8') and file_size < 5000:  # Only log small playlists
-                try:
-                    with open(file_path, 'r') as f:
-                        content = f.read()
-                        logger.debug(f"Playlist content:\n{content}")
-                except Exception as e:
-                    logger.debug(f"Could not read playlist content: {e}")
             
             # Send file with appropriate headers
             response = send_file(file_path, mimetype=mimetype)
