@@ -379,13 +379,13 @@ class HLSStreamManager:
                 init_filename = None
             
             # Build FFmpeg command for HLS
-            # Optimized for fast startup and Plex compatibility
+            # Optimized for Plex/web/TV compatibility
             ffmpeg_cmd = [
                 "ffmpeg",
-                "-fflags", "+genpts+igndts",
-                "-err_detect", "aggressive",
-                "-analyzeduration", "0",        # Fast input startup
-                "-probesize", "32",             # Minimal probing for faster start
+                "-fflags", "+genpts+discardcorrupt",  # Better error handling
+                "-err_detect", "ignore_err",          # More lenient error detection
+                "-analyzeduration", "1000000",        # 1 second - balanced for detection
+                "-probesize", "1000000",              # 1MB - detect codec params properly
                 "-reconnect", "1",
                 "-reconnect_at_eof", "1",
                 "-reconnect_streamed", "1",
@@ -402,10 +402,10 @@ class HLSStreamManager:
             # Input and basic video settings
             ffmpeg_cmd.extend([
                 "-i", stream_url,
-                "-map", "0",                   # Map all streams
-                "-c:v", "copy",                # Always copy video (never transcode)
-                "-copyts",                     # Copy timestamps
-                "-start_at_zero"               # Start at zero timestamp
+                "-map", "0",                        # Map all streams
+                "-c:v", "copy",                     # Always copy video (never transcode)
+                "-tag:v", "hvc1",                   # HEVC HLS compatibility (harmless for H.264)
+                "-avoid_negative_ts", "make_zero"  # Fix timestamp issues
             ])
             
             # Audio codec settings - always transcode for compatibility
