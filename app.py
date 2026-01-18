@@ -379,12 +379,13 @@ class HLSStreamManager:
                 init_filename = None
             
             # Build FFmpeg command for HLS
-            # Based on working mpegts command, adapted for HLS
+            # Optimized for fast startup and Plex compatibility
             ffmpeg_cmd = [
                 "ffmpeg",
-                "-fflags", "+genpts+igndts+nobuffer",
+                "-fflags", "+genpts+igndts",
                 "-err_detect", "aggressive",
-                "-flags", "low_delay",
+                "-analyzeduration", "0",        # Fast input startup
+                "-probesize", "32",             # Minimal probing for faster start
                 "-reconnect", "1",
                 "-reconnect_at_eof", "1",
                 "-reconnect_streamed", "1",
@@ -417,9 +418,14 @@ class HLSStreamManager:
             logger.debug(f"Using AAC audio transcoding at 256k with async resampling")
             
             
-            # HLS output settings with conditional flags
-            # Removed delete_segments to prevent premature segment deletion
-            hls_flags = "independent_segments+omit_endlist"
+            # HLS output settings optimized for fast startup
+            # Small segments (1s) and short init time for quick first segment
+            hls_time = "1"  # 1 second segments for fast startup
+            hls_list = "5"  # Keep 5 segments (5s buffer)
+            hls_init_time = "0.5"  # First segment can be as short as 0.5s
+            
+            # HLS flags optimized for Plex compatibility
+            hls_flags = "independent_segments+omit_endlist+discont_start+split_by_time"
             
             # Add format-specific flags only when needed
             if segment_type == "mpegts":
@@ -433,13 +439,14 @@ class HLSStreamManager:
             
             ffmpeg_cmd.extend([
                 "-f", "hls",
-                "-hls_time", segment_duration,
-                "-hls_list_size", playlist_size,
+                "-hls_init_time", hls_init_time,  # Faster first segment
+                "-hls_time", hls_time,
+                "-hls_list_size", hls_list,
                 "-hls_flags", hls_flags,
                 "-hls_segment_type", segment_type,
                 "-hls_segment_filename", segment_pattern,
                 "-start_number", "0",
-                "-flush_packets", "0"
+                "-hls_allow_cache", "0"  # Disable caching for live streams
             ])
             
             # Add init filename for fMP4
@@ -1647,12 +1654,12 @@ def generate_playlist():
             channel_entry += '" group-title="' + str(genre)
         
         channel_entry += '",' + channel_name + "\n"
-        
-        # Use HLS URL if output format is set to HLS, otherwise use MPEG-TS
-        if getSettings().get("output format", "mpegts") == "hls":
-            channel_entry += f"http://{playlist_host}/hls/{portal}/{channel_id}/master.m3u8"
-        else:
-            channel_entry += f"http://{playlist_host}/play/{portal}/{channel_id}"
+
+        # Always use /play/ URL - it handles hybrid MPEG-TS + HLS:
+        # - If HLS ready: redirects to HLS
+        # - If HLS not ready: serves MPEG-TS immediately while starting HLS in background
+        # This gives instant playback in all cases
+        channel_entry += f"http://{playlist_host}/play/{portal}/{channel_id}"
         
         channels.append(channel_entry)
     
@@ -1963,6 +1970,42 @@ def channel(portalId, channelId):
 
         if link:
             if getSettings().get("test streams", "true") == "false" or testStream():
+                # Hybrid MPEG-TS + HLS: Check if HLS output format is selected
+                # and handle HLS with instant MPEG-TS fallback
+                if not web and getSettings().get("output format", "mpegts") == "hls":
+                    stream_key = f"{portalId}_{channelId}"
+                    hls_ready = False
+
+                    # Check if HLS stream already has segments ready
+                    if stream_key in hls_manager.streams:
+                        try:
+                            temp_dir = hls_manager.streams[stream_key]['temp_dir']
+                            segments = [f for f in os.listdir(temp_dir) if f.endswith('.ts') or f.endswith('.m4s')]
+                            if len(segments) >= 2:
+                                hls_ready = True
+                                logger.info(f"HLS ready for {stream_key} ({len(segments)} segments), redirecting to HLS")
+                        except Exception as e:
+                            logger.debug(f"Error checking HLS segments: {e}")
+
+                    if hls_ready:
+                        # HLS is ready - redirect to HLS endpoint
+                        return redirect(f"/hls/{portalId}/{channelId}/master.m3u8")
+                    else:
+                        # HLS not ready - start HLS in background, serve MPEG-TS immediately
+                        # This gives instant playback while HLS generates in parallel
+                        logger.info(f"Starting HLS in background for {stream_key}, serving MPEG-TS now")
+
+                        def start_hls_background():
+                            try:
+                                hls_manager.start_stream(portalId, channelId, link, proxy)
+                            except Exception as e:
+                                logger.error(f"Background HLS start failed for {stream_key}: {e}")
+
+                        hls_thread = threading.Thread(target=start_hls_background, daemon=True)
+                        hls_thread.start()
+
+                        # Continue to serve MPEG-TS below (fall through to ffmpeg streaming)
+
                 if web:
                     ffmpegcmd = [
                         "ffmpeg",
@@ -2296,11 +2339,37 @@ def hls_stream(portalId, channelId, filename):
                 except Exception as e:
                     logger.debug(f"Could not read playlist content: {e}")
             
-            return send_file(file_path, mimetype=mimetype)
+            # Send file with appropriate headers
+            response = send_file(file_path, mimetype=mimetype)
+            
+            # Add Cache-Control headers for playlists to force fresh fetches
+            if filename.endswith('.m3u8'):
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+            
+            return response
         except Exception as e:
             logger.error(f"✗ Error serving HLS file {filename}: {e}")
             return make_response("Error serving file", 500)
     else:
+        # If stream.m3u8 not ready but FFmpeg is running, return valid empty playlist
+        # This allows Plex to retry without timing out
+        if filename == "stream.m3u8" and stream_key in hls_manager.streams:
+            stream_info = hls_manager.streams[stream_key]
+            process = stream_info.get('process')
+            if process and process.poll() is None:  # FFmpeg still running
+                logger.info(f"Returning empty playlist for {stream_key} - FFmpeg still starting")
+                empty_playlist = """#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:1
+#EXT-X-MEDIA-SEQUENCE:0
+"""
+                response = Response(empty_playlist, mimetype='application/vnd.apple.mpegurl')
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Retry-After'] = '1'  # Hint client to retry in 1s
+                return response
+
         logger.warning(f"✗ HLS file not found: {filename} for {stream_key}")
         return make_response("File not found", 404)
 
@@ -2422,11 +2491,10 @@ def refresh_lineup():
         channel_name = row['custom_name'] if row['custom_name'] else row['name']
         channel_number = row['custom_number'] if row['custom_number'] else row['number']
         
-        # Use HLS URL if output format is set to HLS, otherwise use MPEG-TS
-        if getSettings().get("output format", "mpegts") == "hls":
-            url = f"http://{host}/hls/{portal}/{channel_id}/master.m3u8"
-        else:
-            url = f"http://{host}/play/{portal}/{channel_id}"
+        # Always use /play/ URL - it handles hybrid MPEG-TS + HLS:
+        # - If HLS ready: redirects to HLS
+        # - If HLS not ready: serves MPEG-TS immediately while starting HLS in background
+        url = f"http://{host}/play/{portal}/{channel_id}"
         
         lineup.append({
             "GuideNumber": str(channel_number),

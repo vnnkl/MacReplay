@@ -107,8 +107,8 @@ def validate_hls_flags():
     if 'independent_segments' not in source:
         errors.append("Missing HLS flag: independent_segments")
     
-    if 'delete_segments' not in source:
-        errors.append("Missing HLS flag: delete_segments")
+    if 'split_by_time' not in source:
+        errors.append("Missing HLS flag: split_by_time (for consistent segments)")
     
     if 'omit_endlist' not in source:
         errors.append("Missing HLS flag: omit_endlist")
